@@ -151,6 +151,24 @@ The bot uses SQLite for data persistence. Database file: `bot_data.db`
 LOG_LEVEL=DEBUG python main.py
 ```
 
+### Smoke test (quick)
+
+A simple startup smoke check is included to validate the environment and perform an optional network check:
+
+- Quick (no network):
+
+```bash
+python scripts/smoke_check.py
+```
+
+- With network (checks token by calling `get_me`):
+
+```bash
+python scripts/smoke_check.py --network
+```
+
+The script exits with code `0` when all checks pass and non-zero when any check fails. The quick check is safe for CI.
+
 ## 🐛 Troubleshooting
 
 **Bot not responding?**
