@@ -3,6 +3,7 @@ Configuration file for the Telegram Bot.
 Load environment variables and set up constants.
 """
 import os
+from dotenv import load_dotenv
 from pathlib import Path
 from typing import Final
 
@@ -10,9 +11,10 @@ from typing import Final
 BASE_DIR: Path = Path(__file__).parent.absolute()
 
 # Bot Configuration
-BOT_TOKEN: Final[str] = os.getenv("BOT_TOKEN", "8524740209:AAEEAEetWa4zy3Qve3UCHfCwu9XC8D87FDg")
-ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "6196091106"))
+load_dotenv()
 
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 # Database
 DB_PATH: Final[Path] = BASE_DIR / "bot_data.db"
 
