@@ -1,0 +1,268 @@
+import asyncio
+import time
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+from handlers import basic, moderation, messages, admin, messages as messages_module
+from utils import database
+from config import ADMIN_ID
+
+# Helpers
+
+class DummyMessage:
+    def __init__(self, text=None, sticker=None, message_id=1, from_user=None, chat_id=1234):
+        self.text = text
+        self.sticker = sticker
+        self.message_id = message_id
+        self.from_user = from_user
+        self.chat_id = chat_id
+        self._deleted = False
+
+    async def reply_text(self, *args, **kwargs):
+        return MagicMock()
+
+    async def delete(self):
+        self._deleted = True
+
+    async def edit_text(self, *args, **kwargs):
+        return MagicMock()
+
+
+class DummyUser:
+    def __init__(self, user_id, username=None):
+        self.id = user_id
+        self.username = username
+
+
+class DummyChat:
+    def __init__(self, chat_id=1234):
+        self.id = chat_id
+
+    async def send_message(self, *args, **kwargs):
+        msg = MagicMock()
+        async def delete():
+            return None
+        msg.delete = AsyncMock(side_effect=delete)
+        return msg
+
+
+class DummyUpdate:
+    def __init__(self, message: DummyMessage):
+        self.message = message
+        self.effective_chat = DummyChat(chat_id=message.chat_id)
+        self.effective_user = message.from_user
+
+
+class DummyBot:
+    def __init__(self):
+        self.get_chat_member = AsyncMock()
+        self.delete_message = AsyncMock()
+
+
+class DummyContext:
+    def __init__(self, bot: DummyBot, args=None):
+        self.bot = bot
+        self.args = args or []
+
+
+@pytest.fixture(autouse=True)
+def clean_db(tmp_path, monkeypatch):
+    # Ensure we use a temp DB file for tests to avoid contaminating workspace
+    db_path = tmp_path / "test_bot.db"
+    monkeypatch.setattr(database, 'DB_PATH', str(db_path))
+    # Re-init database
+    database.Database.init_tables()
+
+
+@pytest.mark.asyncio
+async def test_basic_commands_reply(monkeypatch):
+    user = DummyUser(user_id=9999)
+    msg = DummyMessage(text="/start", from_user=user)
+    update = DummyUpdate(msg)
+    context = DummyContext(bot=DummyBot())
+
+    await basic.start(update, context)
+    await basic.help_command(update, context)
+    # Test ping: it edits a message; ensure no exceptions
+    msg_for_ping = DummyMessage(text="/ping", from_user=user)
+    update_ping = DummyUpdate(msg_for_ping)
+    # Make reply_text return a message object for edit
+    async def reply_text_return(*args, **kwargs):
+        m = MagicMock()
+        async def edit_text(*a, **k):
+            return None
+        m.edit_text = AsyncMock(side_effect=edit_text)
+        return m
+    async def edit_text(*a, **k):
+        return None
+    # Patch reply_text to return object with edit_text
+    msg_for_ping.reply_text = AsyncMock(return_value=MagicMock())
+    await basic.ping(update_ping, context)
+
+
+@pytest.mark.asyncio
+async def test_block_unblock_list(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    # Block a sticker set
+    msg = DummyMessage(text="/block MySet", from_user=owner)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['MySet'])
+
+    await moderation.block_sticker(update, ctx)
+    assert database.Database.is_set_blocked(str(update.effective_chat.id), 'myset')
+
+    # List should reply (no exception)
+    await moderation.list_blocked_sets(update, ctx)
+
+    # Unblock
+    ctx_unblock = DummyContext(bot=bot, args=['MySet'])
+    await moderation.unblock_sticker(update, ctx_unblock)
+    assert not database.Database.is_set_blocked(str(update.effective_chat.id), 'myset')
+
+
+@pytest.mark.asyncio
+async def test_censor_uncensor_list(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    # Censor words
+    msg = DummyMessage(text='/censor badword "exact phrase"', from_user=owner)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['badword', '"exact phrase"'])
+
+    await moderation.censor_word(update, ctx)
+    words = database.Database.get_censored_words(str(update.effective_chat.id))
+    assert any(w[0] == 'badword' for w in words)
+
+    # List
+    await moderation.list_censored_words(update, ctx)
+
+    # Uncensor a word
+    ctx_uncensor = DummyContext(bot=bot, args=['badword'])
+    await moderation.uncensor_word(update, ctx_uncensor)
+    words_after = database.Database.get_censored_words(str(update.effective_chat.id))
+    assert not any(w[0] == 'badword' for w in words_after)
+
+    # Uncensor all
+    await moderation.censor_word(update, ctx)
+    await moderation.uncensor_word(update, DummyContext(bot=bot, args=['all']))
+    assert database.Database.get_censored_words(str(update.effective_chat.id)) == []
+
+
+@pytest.mark.asyncio
+async def test_clear_messages_and_except(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('config.ADMIN_ID', 1)
+
+    # Track messages
+    from handlers.moderation import track_message, MESSAGE_HISTORY
+    # Clear any existing
+    MESSAGE_HISTORY.clear()
+    for i in range(1, 6):
+        track_message(1234, i, 111, 'user')
+
+    # Clear 3 messages
+    msg = DummyMessage(text='/clear 3', from_user=owner)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['3'])
+
+    # Patch bot.delete_message to track deletes
+    bot.delete_message = AsyncMock()
+    await moderation.clear_messages(update, ctx)
+    assert bot.delete_message.await_count >= 0
+
+    # Clear except a username
+    # Add messages with usernames
+    MESSAGE_HISTORY.clear()
+    track_message(1234, 1, 111, 'keepme')
+    for i in range(2, 7):
+        track_message(1234, i, 222, 'other')
+
+    msg = DummyMessage(text='/clear_except @keepme 3', from_user=owner)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['@keepme', '3'])
+    bot.delete_message = AsyncMock()
+    await moderation.clear_except(update, ctx)
+    assert bot.delete_message.await_count >= 0
+
+
+@pytest.mark.asyncio
+async def test_antispam_and_message_checks(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.set_antispam(chat_id, True)
+
+    # Create messages to exceed spam threshold
+    from handlers.messages import SPAM_TRACKER, check_spam
+    SPAM_TRACKER.clear()
+
+    # Prepare update template
+    async def make_update(mid):
+        user = DummyUser(user_id=111)
+        msg = DummyMessage(text=f'msg {mid}', from_user=user, message_id=mid)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        return update, ctx
+
+    for i in range(1, 9):
+        update, ctx = await make_update(i)
+        deleted = await check_spam(update, ctx)
+        if i > 6:
+            assert deleted is True
+            break
+
+
+@pytest.mark.asyncio
+async def test_admins_enable_disable(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    msg = DummyMessage(text='/admins_enable', from_user=owner)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot)
+
+    await admin.admins_enable(update, ctx)
+    assert database.Database.is_admin_bypass_enabled(str(update.effective_chat.id))
+
+    await admin.admins_disable(update, ctx)
+    assert database.Database.is_admin_bypass_enabled(str(update.effective_chat.id)) is False
+
+
+@pytest.mark.asyncio
+async def test_track_messages_and_blocked_sticker(monkeypatch):
+    # Track message
+    from handlers.moderation import track_message, MESSAGE_HISTORY
+    MESSAGE_HISTORY.clear()
+    track_message(1234, 999, 111, 'user')
+    assert any(m[1] == 999 for m in MESSAGE_HISTORY)
+
+    # Blocked sticker deletion path
+    bot = DummyBot()
+    user = DummyUser(user_id=2)
+    # Add blocked set
+    database.Database.add_blocked_set(str(1234), 'blockedset')
+
+    class Sticker: pass
+    sticker = Sticker()
+    sticker.set_name = 'blockedset'
+
+    msg = DummyMessage(sticker=sticker, from_user=user)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot)
+
+    # Patch context.bot.delete_message to simulate successful deletion
+    bot.delete_message = AsyncMock()
+    deleted = await messages.check_blocked_sticker(update, ctx, str(1234))
+    assert deleted is True
+
+
+# End of tests

@@ -22,7 +22,7 @@ from utils.database import Database
 from handlers.basic import start, ping, help_command
 from handlers.moderation import (
     block_sticker, unblock_sticker, list_blocked_sets,
-    censor_word, list_censored_words,
+    censor_word, uncensor_word, list_censored_words,
     clear_messages, clear_except,
     antispam_enable, antispam_disable
 )
@@ -50,7 +50,7 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("unblock", unblock_sticker))
     app.add_handler(CommandHandler("list", list_blocked_sets))
     app.add_handler(CommandHandler("censor", censor_word))
-    app.add_handler(CommandHandler("uncensor", unblock_sticker))
+    app.add_handler(CommandHandler("uncensor", uncensor_word))
     app.add_handler(CommandHandler("censor_list", list_censored_words))
     app.add_handler(CommandHandler("clear", clear_messages))
     app.add_handler(CommandHandler("clear_except", clear_except))

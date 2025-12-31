@@ -137,6 +137,39 @@ async def list_censored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @admin_or_owner
 @handle_errors
+async def uncensor_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /uncensor command - remove censored words or clear all."""
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Usage: `/uncensor word1 word2` or `/uncensor all`",
+            parse_mode='Markdown'
+        )
+        return
+
+    chat_id = str(update.effective_chat.id)
+
+    # Handle "uncensor all"
+    if len(context.args) == 1 and context.args[0].lower() == "all":
+        if Database.clear_all_censored_words(chat_id):
+            await update.message.reply_text("✅ All censored words removed.")
+        else:
+            await update.message.reply_text("⚠️ No censored words to remove.")
+        return
+
+    removed_any = False
+    for raw in context.args:
+        word = raw.strip().lower()
+        if Database.remove_censored_word(chat_id, word):
+            removed_any = True
+
+    if removed_any:
+        await update.message.reply_text("✅ Censored words updated.")
+    else:
+        await update.message.reply_text("⚠️ No specified words were found in the censored list.")
+
+
+@admin_or_owner
+@handle_errors
 async def clear_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /clear command - delete last N messages."""
     count = 10  # Default
@@ -248,3 +281,5 @@ async def antispam_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def track_message(chat_id: int, message_id: int, user_id: int, username: str):
     """Add message to history for clear commands."""
     MESSAGE_HISTORY.append((chat_id, message_id, user_id, username))
+    
+    
