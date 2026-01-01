@@ -65,7 +65,7 @@ def extract_set_name(text: str) -> str:
     return text.strip().lower()
 
 
-def normalize_text(text: str, remove_non_alnum: bool = True) -> str:
+def normalize_text(text: str, remove_non_alnum: bool = True, collapse_repeats: bool = True) -> str:
     """
     Normalize text for censoring/matching.
 
@@ -114,23 +114,42 @@ def normalize_text(text: str, remove_non_alnum: bool = True) -> str:
         # Common Arabic punctuation that might be used as separators will be removed by normalization
     }
 
-    # If Arabic characters are present, prefer a mapping that does not
-    # inject Latin letters between Arabic letters. Map Arabic-Indic digits, but
-    # treat common symbol separators as separators (remove or convert to space).
-    if re.search(r'[\u0600-\u06FF]', s):
-        arabic_map = {}
-        # Map Arabic-Indic / Persian digits to western digits
-        for k, v in leet_map.items():
-            if k in '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹':
-                arabic_map[k] = v
-        # Treat common symbol separators as empty so they don't inject Latin letters
-        separators = ['@', '$', '!', '|', '#', '%', '&', '*']
-        for sep in separators:
-            arabic_map[sep] = ''
-        s = ''.join(arabic_map.get(ch, ch) for ch in s)
-    else:
-        s = ''.join(leet_map.get(ch, ch) for ch in s)
+    # Decide on mapping strategy depending on whether we are in 'compact' or
+    # 'preserve' mode. In preserve mode we want separators (like @ # $) to
+    # become spaces so permissive regexes can match across them (e.g. "6@7").
+    has_arabic = bool(re.search(r'[\u0600-\u06FF]', s))
+    separators = ['@', '$', '!', '|', '#', '%', '&', '*', '.', ',', '-', '_', '/', '\\', ':', ';', '(', ')', '[', ']', '{', '}', '+', '=', '<', '>', '?', '^', '`', '~']
 
+    if remove_non_alnum:
+        # Compact mode: apply leet substitutions to make direct substring checks
+        if has_arabic:
+            arabic_map = {}
+            for k, v in leet_map.items():
+                if k in '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹':
+                    arabic_map[k] = v
+            s = ''.join(arabic_map.get(ch, ch) for ch in s)
+        else:
+            s = ''.join(leet_map.get(ch, ch) for ch in s)
+    else:
+        # Preserve mode (keep separators as spaces): map known separators to space
+        if has_arabic:
+            preserve_map = {}
+            for k, v in leet_map.items():
+                if k in '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹':
+                    preserve_map[k] = v
+            for sep in separators:
+                preserve_map[sep] = ' '
+            s = ''.join(preserve_map.get(ch, ch) for ch in s)
+        else:
+            preserve_map = {}
+            # Map digits to themselves (or mapped value if present) but do not map
+            # separator symbols to letters: turn them into spaces
+            for k, v in leet_map.items():
+                if k.isdigit():
+                    preserve_map[k] = v
+            for sep in separators:
+                preserve_map[sep] = ' '
+            s = ''.join(preserve_map.get(ch, ch) for ch in s)
     # Optionally remove non-alphanumeric (keep them as separators if requested)
     # Allow Arabic letters (Unicode range \u0600-\u06FF) so Arabic words are preserved
     arabic_range = '\\u0600-\\u06FF'

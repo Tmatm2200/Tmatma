@@ -6,7 +6,7 @@ import re
 from collections import deque
 from telegram import Update
 from telegram.ext import ContextTypes
-from config import MAX_CLEAR_COUNT, MAX_MESSAGE_HISTORY
+from config import MAX_CLEAR_COUNT, MAX_MESSAGE_HISTORY, SPAM_TIME_WINDOW
 from utils.database import Database
 from utils.decorators import admin_or_owner, handle_errors
 
@@ -291,7 +291,8 @@ async def antispam_enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /antispam_enable command."""
     chat_id = str(update.effective_chat.id)
     Database.set_antispam(chat_id, True)
-    await update.message.reply_text("🚨 Anti-Spam enabled (6 messages / 10 seconds).")
+    limit, minutes = Database.get_spam_settings(chat_id)
+    await update.message.reply_text(f"🚨 Anti-Spam enabled ({limit} msgs / {SPAM_TIME_WINDOW}s).")
 
 
 @admin_or_owner
@@ -301,6 +302,32 @@ async def antispam_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     Database.set_antispam(chat_id, False)
     await update.message.reply_text("😴 Anti-Spam disabled.")
+
+
+@admin_or_owner
+@handle_errors
+async def antispam_set_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /antispam_set_limit <count> - set messages allowed in time window."""
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Usage: `/antispam_set_limit <count>`", parse_mode='Markdown')
+        return
+    limit = max(1, min(int(context.args[0]), 100))
+    chat_id = str(update.effective_chat.id)
+    Database.set_spam_limit(chat_id, limit)
+    await update.message.reply_text(f"✅ Anti-Spam limit set to {limit} messages per {SPAM_TIME_WINDOW} seconds.")
+
+
+@admin_or_owner
+@handle_errors
+async def antispam_set_mute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /antispam_set_mute <minutes> - set mute duration after spam."""
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Usage: `/antispam_set_mute <minutes>`", parse_mode='Markdown')
+        return
+    minutes = max(1, min(int(context.args[0]), 1440))
+    chat_id = str(update.effective_chat.id)
+    Database.set_spam_mute(chat_id, minutes)
+    await update.message.reply_text(f"✅ Mute duration set to {minutes} minutes for spamming.")
 
 
 def track_message(chat_id: int, message_id: int, user_id: int, username: str):

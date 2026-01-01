@@ -89,7 +89,9 @@ class Database:
             )""",
             """CREATE TABLE IF NOT EXISTS chat_settings (
                 chat_id TEXT PRIMARY KEY,
-                antispam_enabled INTEGER DEFAULT 0
+                antispam_enabled INTEGER DEFAULT 0,
+                spam_limit INTEGER DEFAULT 5,
+                spam_mute_minutes INTEGER DEFAULT 15
             )"""
         ]
         
@@ -212,6 +214,63 @@ class Database:
             (chat_id, 1 if enabled else 0)
         )
         return result is not None
+
+    @staticmethod
+    def set_spam_limit(chat_id: str, limit: int) -> bool:
+        """Set per-chat spam message limit."""
+        existing = execute_query(
+            "SELECT 1 FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        if existing:
+            result = execute_query(
+                "UPDATE chat_settings SET spam_limit = ? WHERE chat_id = ?",
+                (limit, chat_id)
+            )
+        else:
+            from config import SPAM_MUTE_DURATION_MINUTES
+            result = execute_query(
+                "INSERT INTO chat_settings (chat_id, antispam_enabled, spam_limit, spam_mute_minutes) VALUES (?, ?, ?, ?)",
+                (chat_id, 0, limit, SPAM_MUTE_DURATION_MINUTES)
+            )
+        return result is not None
+
+    @staticmethod
+    def set_spam_mute(chat_id: str, minutes: int) -> bool:
+        """Set per-chat spam mute duration in minutes."""
+        existing = execute_query(
+            "SELECT 1 FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        if existing:
+            result = execute_query(
+                "UPDATE chat_settings SET spam_mute_minutes = ? WHERE chat_id = ?",
+                (minutes, chat_id)
+            )
+        else:
+            from config import SPAM_MESSAGE_LIMIT
+            result = execute_query(
+                "INSERT INTO chat_settings (chat_id, antispam_enabled, spam_limit, spam_mute_minutes) VALUES (?, ?, ?, ?)",
+                (chat_id, 0, SPAM_MESSAGE_LIMIT, minutes)
+            )
+        return result is not None
+
+    @staticmethod
+    def get_spam_settings(chat_id: str) -> Tuple[int, int]:
+        """Return (spam_limit, mute_minutes) for a chat, falling back to config defaults."""
+        from config import SPAM_MESSAGE_LIMIT, SPAM_MUTE_DURATION_MINUTES
+        result = execute_query(
+            "SELECT spam_limit, spam_mute_minutes FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        if result:
+            limit = result[0] if result[0] is not None else SPAM_MESSAGE_LIMIT
+            minutes = result[1] if result[1] is not None else SPAM_MUTE_DURATION_MINUTES
+            return int(limit), int(minutes)
+        return SPAM_MESSAGE_LIMIT, SPAM_MUTE_DURATION_MINUTES
     
     @staticmethod
     def is_antispam_enabled(chat_id: str) -> bool:

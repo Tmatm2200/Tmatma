@@ -29,6 +29,8 @@ __all__ = [
     'clear_except',
     'antispam_enable',
     'antispam_disable',
+    'antispam_set_limit',
+    'antispam_set_mute',
     'admins_enable',
     'admins_disable',
     'handle_messages',

@@ -60,7 +60,7 @@ async def run_check():
     Database.clear_all_censored_words(chat_id)
     Database.add_censored_word(chat_id, 'shit', False)
 
-    variants = ['sh!t', 's.h.i.t', '5h1t', 's h i t', 'shiiit', 's#h$t']
+    variants = ['sh!t', 's.h.i.t', '5h1t', 's h i t', 'shiiit', 's#h$t', 's$h$t']
 
     print('Testing variants for censored word "shit":')
 
@@ -70,8 +70,25 @@ async def run_check():
         ctx = SimpleNamespace(bot=DummyBot())
         # Reset delete flag
         msg._deleted = False
+        from utils.helpers import normalize_text
+        print('---')
+        print('raw:', v)
+        print('compact:', normalize_text(v, remove_non_alnum=True))
+        print('preserve:', normalize_text(v, remove_non_alnum=False))
         await messages.handle_messages(update, ctx)
         print(f"{v:10} -> {'DELETED' if msg._deleted else 'ALLOWED'}")
+
+    print('\nTesting numeric separators for censored word "67":')
+    Database.add_censored_word(chat_id, '67', False)
+    numeric_variants = ['6$7', '6#7', '6@7', '6!7', '6-7', '6_7', '6 7']
+    for v in numeric_variants:
+        msg = DummyMessage(text=v, message_id=hash(v) % 100000, from_user=DummyUser(111), chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = SimpleNamespace(bot=DummyBot())
+        msg._deleted = False
+        await messages.handle_messages(update, ctx)
+        print(f"{v:10} -> {'DELETED' if msg._deleted else 'ALLOWED'}")
+    Database.remove_censored_word(chat_id, '67')
 
     # Arabic tests
     print('\nTesting Arabic variants for censored word "لعنة":')
@@ -100,6 +117,20 @@ async def run_check():
     msg_num._deleted = False
     await messages.handle_messages(update_num, ctx_num)
     print(f"٦٩ -> {'DELETED' if msg_num._deleted else 'ALLOWED'}")
+
+    # Repeated-character test for Arabic
+    print('\nTesting repeated-character censor (censor "خخخخخ" should match runs >=5)')
+    Database.add_censored_word(chat_id, 'خخخخخ', False)
+    samples = ['خ', 'خخ', 'خخخخخ', 'xخخخخخx', 'خخخخ', 'خخخخخخ']
+    for v in samples:
+        msg = DummyMessage(text=v, message_id=hash(v) % 100000, from_user=DummyUser(111), chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = SimpleNamespace(bot=DummyBot())
+        print('---')
+        print('raw:', v)
+        print('compact:', normalize_text(v, remove_non_alnum=True, collapse_repeats=False))
+        await messages.handle_messages(update, ctx)
+        print(f"{v:10} -> {'DELETED' if msg._deleted else 'ALLOWED'}")
 
     # Cleanup
     Database.remove_censored_word(chat_id, 'shit')

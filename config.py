@@ -22,8 +22,10 @@ DB_PATH: Final[Path] = BASE_DIR / "bot_data.db"
 MAX_MESSAGE_HISTORY: Final[int] = 3000
 
 # Anti-Spam Settings
-SPAM_MESSAGE_LIMIT: Final[int] = 6
+SPAM_MESSAGE_LIMIT: Final[int] = 5  # messages allowed in time window
 SPAM_TIME_WINDOW: Final[int] = 10  # seconds
+# When a user exceeds the spam limit, mute duration in minutes
+SPAM_MUTE_DURATION_MINUTES: Final[int] = 15
 
 # Rate Limits
 MAX_CLEAR_COUNT: Final[int] = 100

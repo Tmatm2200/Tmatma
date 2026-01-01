@@ -238,8 +238,107 @@ async def test_antispam_and_message_checks(monkeypatch):
     for i in range(1, 9):
         update, ctx = await make_update(i)
         deleted = await check_spam(update, ctx)
-        if i > 6:
+        # With SPAM_MESSAGE_LIMIT set to 5, deletion/mute should begin after the 6th message
+        if i > 5:
             assert deleted is True
+            break
+
+
+@pytest.mark.asyncio
+async def test_spam_triggers_mute(monkeypatch):
+    """Exceeding spam threshold mutes the user for configured duration."""
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.set_antispam(chat_id, True)
+
+    # Prepare update template for one user
+    async def make_update(mid):
+        user = DummyUser(user_id=555)
+        msg = DummyMessage(text=f'msg {mid}', from_user=user, message_id=mid, chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        return update, ctx
+
+    # Patch bot methods
+    bot.delete_message = AsyncMock()
+    bot.restrict_chat_member = AsyncMock()
+    bot.send_message = AsyncMock()
+
+    # Send messages to exceed threshold (limit is 5 -> trigger on 6th)
+    for i in range(1, 7):
+        update, ctx = await make_update(i)
+        deleted = await check_spam(update, ctx)
+        # On trigger, check that restrict_chat_member has been called
+        if i > 5:
+            assert deleted is True
+                    assert bot.restrict_chat_member.await_count >= 1
+            break
+
+
+@pytest.mark.asyncio
+async def test_admin_can_set_spam_limit_and_mute(monkeypatch):
+    bot = DummyBot()
+    admin = DummyUser(user_id=222)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    # Simulate admin with edit permission
+    member = MagicMock()
+    member.status = 'administrator'
+    member.can_delete_messages = False
+    member.can_edit_messages = True
+
+    bot.get_chat_member.return_value = member
+
+    # Set limit
+    msg = DummyMessage(text='/antispam_set_limit 3', from_user=admin)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['3'])
+
+    await moderation.antispam_set_limit(update, ctx)
+    limit, minutes = database.Database.get_spam_settings(str(update.effective_chat.id))
+    assert limit == 3
+
+    # Set mute duration
+    msg2 = DummyMessage(text='/antispam_set_mute 2', from_user=admin)
+    update2 = DummyUpdate(msg2)
+    ctx2 = DummyContext(bot=bot, args=['2'])
+
+    await moderation.antispam_set_mute(update2, ctx2)
+    limit2, minutes2 = database.Database.get_spam_settings(str(update2.effective_chat.id))
+    assert minutes2 == 2
+
+
+@pytest.mark.asyncio
+async def test_spam_respects_custom_limit(monkeypatch):
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.set_antispam(chat_id, True)
+    database.Database.set_spam_limit(chat_id, 3)
+    database.Database.set_spam_mute(chat_id, 1)
+
+    # Prepare update template
+    async def make_update(mid):
+        user = DummyUser(user_id=111)
+        msg = DummyMessage(text=f'msg {mid}', from_user=user, message_id=mid, chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        return update, ctx
+
+    bot.delete_message = AsyncMock()
+    bot.restrict_chat_member = AsyncMock()
+
+    for i in range(1, 6):
+        update, ctx = await make_update(i)
+        deleted = await check_spam(update, ctx)
+        if i > 3:
+            assert deleted is True
+            assert bot.restrict_chat_member.await_count >= 1
             break
 
 
@@ -369,7 +468,7 @@ async def test_censor_leetspeak_and_separators(monkeypatch):
     chat_id = str(1234)
     database.Database.add_censored_word(chat_id, 'shit', False)
 
-    variants = ['sh!t', 's.h.i.t', '5h1t', 's h i t', 'shiiit']
+    variants = ['sh!t', 's.h.i.t', '5h1t', 's h i t', 'shiiit', 's#h$t', 's$h$t']
     for i, variant in enumerate(variants, start=1):
         msg = DummyMessage(text=variant, from_user=user, message_id=100 + i, chat_id=1234)
         update = DummyUpdate(msg)
@@ -379,6 +478,17 @@ async def test_censor_leetspeak_and_separators(monkeypatch):
         await messages.handle_messages(update, ctx)
         assert msg._deleted is True, f"Variant {variant} was not deleted"
 
+    # Numeric separators: censor '67' should match '6$7', '6#7', etc.
+    database.Database.add_censored_word(chat_id, '67', False)
+    numeric_variants = ['6$7', '6#7', '6@7', '6!7', '6-7', '6_7', '6 7']
+    for i, variant in enumerate(numeric_variants, start=1):
+        msg = DummyMessage(text=variant, from_user=user, message_id=150 + i, chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        msg._deleted = False
+        await messages.handle_messages(update, ctx)
+        assert msg._deleted is True, f"Numeric variant {variant} was not deleted"
+    database.Database.remove_censored_word(chat_id, '67')
     # Arabic variants
     database.Database.add_censored_word(chat_id, 'لعنة', False)
     arabic_variants = ['لعنة', 'ل@ع#ن%ة', 'ل ع ن ة', 'لّعنَة']
@@ -398,10 +508,21 @@ async def test_censor_leetspeak_and_separators(monkeypatch):
     await messages.handle_messages(update_num, ctx_num)
     assert msg_num._deleted is True
 
+    # Repeated-character censor: 'خخخخخ' should only match runs >=5
+    database.Database.add_censored_word(chat_id, 'خخخخخ', False)
+    msg_short = DummyMessage(text='خخ', from_user=user, message_id=400, chat_id=1234)
+    await messages.handle_messages(DummyUpdate(msg_short), DummyContext(bot=bot))
+    assert msg_short._deleted is False
+
+    msg_long = DummyMessage(text='xxxxخخخخخyyyy', from_user=user, message_id=401, chat_id=1234)
+    await messages.handle_messages(DummyUpdate(msg_long), DummyContext(bot=bot))
+    assert msg_long._deleted is True
+
     # Cleanup
     database.Database.remove_censored_word(chat_id, 'shit')
     database.Database.remove_censored_word(chat_id, 'لعنة')
     database.Database.remove_censored_word(chat_id, '٦')
+    database.Database.remove_censored_word(chat_id, 'خخخخخ')
 
 
 @pytest.mark.asyncio

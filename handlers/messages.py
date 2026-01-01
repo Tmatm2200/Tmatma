@@ -5,7 +5,7 @@ import re
 import time
 import random
 from collections import defaultdict
-from telegram import Update
+from telegram import Update, ChatPermissions
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, SPAM_MESSAGE_LIMIT, SPAM_TIME_WINDOW, ENABLE_ARABIC_RESPONSES
 from utils.database import Database
@@ -89,8 +89,11 @@ async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
     # Add current message
     SPAM_TRACKER[key].append((message_id, now))
     
+    # Get per-chat spam settings
+    limit, mute_minutes = Database.get_spam_settings(chat_id)
+
     # Check if spam limit exceeded
-    if len(SPAM_TRACKER[key]) > SPAM_MESSAGE_LIMIT:
+    if len(SPAM_TRACKER[key]) > limit:
         # Delete all messages except the first one
         for mid, _ in SPAM_TRACKER[key][1:]:
             try:
@@ -100,6 +103,27 @@ async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
         
         # Keep only first message in tracker
         SPAM_TRACKER[key] = [SPAM_TRACKER[key][0]]
+
+        # Mute the user for configured duration (disallow messages and media)
+        try:
+            until_ts = int(time.time() + mute_minutes * 60)
+            permissions = ChatPermissions(
+                can_send_messages=False,
+                can_send_media_messages=False,
+                can_send_polls=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False
+            )
+            # Use bot.restrict_chat_member to mute
+            await context.bot.restrict_chat_member(chat_id, user_id, permissions=permissions, until_date=until_ts)
+            # Notify chat (best-effort)
+            try:
+                await context.bot.send_message(chat_id, f"🔇 User has been muted for {mute_minutes} minutes due to spam.")
+            except:
+                pass
+        except Exception:
+            pass
+
         return True
     
     return False
@@ -138,15 +162,20 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
 
     raw_text = update.message.text or ""
     # Normalized versions of the message
-    normalized_compact = normalize_text(raw_text, remove_non_alnum=True)
-    normalized_preserve = normalize_text(raw_text, remove_non_alnum=False)
+    # compact version removes non-alnum and (by default) collapses repeated chars
+    normalized_compact = normalize_text(raw_text, remove_non_alnum=True, collapse_repeats=True)
+    # preserve version keeps separators as spaces and (importantly) keeps repeated chars
+    normalized_preserve = normalize_text(raw_text, remove_non_alnum=False, collapse_repeats=False)
+    # compact version without collapsing repeats (used for detecting repeated runs)
+    normalized_compact_no_collapse = normalize_text(raw_text, remove_non_alnum=True, collapse_repeats=False)
 
     censored_words = Database.get_censored_words(chat_id)
     if not censored_words:
         return False
 
     for word, is_strict in censored_words:
-        word_norm = normalize_text(word, remove_non_alnum=True)
+        word_norm = normalize_text(word, remove_non_alnum=True, collapse_repeats=True)
+        word_norm_no_collapse = normalize_text(word, remove_non_alnum=True, collapse_repeats=False)
 
         # Strict match: normalized substring anywhere in compact normalized message
         if is_strict:
@@ -157,6 +186,24 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 except:
                     pass
             continue
+
+        # Special handling: if the censored token contains repeated characters
+        # (e.g., 'خخخخخ'), treat it as a run match and require at least that many
+        # consecutive characters in the incoming message. This avoids collapsing
+        # repeats and matching single characters.
+        try:
+            for m in re.finditer(r'(.)\1+', word_norm_no_collapse):
+                ch = m.group(1)
+                run_len = m.end() - m.start()
+                # Check for run in the message (compact, no collapse so repeats preserved)
+                if re.search(fr'{re.escape(ch)}' + r'{' + f'{run_len},' + r'}', normalized_compact_no_collapse):
+                    try:
+                        await update.message.delete()
+                        return True
+                    except:
+                        pass
+        except Exception:
+            pass
 
         # Smart match:
         # If purely numeric, do substring match in compact normalized
@@ -192,6 +239,30 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                         return True
                     except:
                         pass
+
+                # Additional fallback: subsequence match allowing at most one missing
+                # character (useful for obfuscations where letters are omitted
+                # but order is preserved, e.g., 's#h$t' -> 's h t' should match 'shit').
+                try:
+                    # Build a compacted searchable text (letters and digits and arabic letters only)
+                    text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
+                    # Count matched characters of word_norm as ordered subsequence
+                    matched = 0
+                    pos = 0
+                    for ch in word_norm:
+                        idx = text_compacted.find(ch, pos)
+                        if idx != -1:
+                            matched += 1
+                            pos = idx + 1
+                    # Allow at most one missing character
+                    if matched >= max(1, len(word_norm) - 1):
+                        try:
+                            await update.message.delete()
+                            return True
+                        except:
+                            pass
+                except Exception:
+                    pass
             except Exception:
                 pass
 
