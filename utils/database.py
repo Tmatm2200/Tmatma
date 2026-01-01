@@ -105,13 +105,14 @@ class Database:
 
         # Migrate older databases: ensure spam_limit and spam_mute_minutes columns exist
         try:
-            execute_query("ALTER TABLE chat_settings ADD COLUMN spam_limit INTEGER DEFAULT 5")
-        except Exception:
-            pass
-        try:
-            execute_query("ALTER TABLE chat_settings ADD COLUMN spam_mute_minutes INTEGER DEFAULT 15")
-        except Exception:
-            pass
+            result = execute_query("PRAGMA table_info(chat_settings)", fetch_all=True)
+            existing_cols = [row[1] for row in result] if result else []
+            if 'spam_limit' not in existing_cols:
+                execute_query("ALTER TABLE chat_settings ADD COLUMN spam_limit INTEGER DEFAULT 5")
+            if 'spam_mute_minutes' not in existing_cols:
+                execute_query("ALTER TABLE chat_settings ADD COLUMN spam_mute_minutes INTEGER DEFAULT 15")
+        except Exception as e:
+            logger.debug(f"DB migration warning: {e}")
 
         logger.info("Database initialized successfully")
 

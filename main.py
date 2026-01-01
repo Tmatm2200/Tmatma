@@ -23,6 +23,7 @@ from handlers.basic import start, ping, help_command
 from handlers.moderation import (
     block_sticker, unblock_sticker, list_blocked_sets,
     censor_word, uncensor_word, list_censored_words,
+    whitelist_word, list_whitelisted_words, unwhitelist_word,
     clear_messages, clear_except,
     antispam_enable, antispam_disable,
     antispam_set_limit, antispam_set_mute,
