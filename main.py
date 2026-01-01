@@ -54,6 +54,10 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("censor", censor_word))
     app.add_handler(CommandHandler("uncensor", uncensor_word))
     app.add_handler(CommandHandler("censor_list", list_censored_words))
+    # Whitelist commands to exempt phrases from censoring
+    app.add_handler(CommandHandler("whitelist", whitelist_word))
+    app.add_handler(CommandHandler("unwhitelist", unwhitelist_word))
+    app.add_handler(CommandHandler("whitelist_list", list_whitelisted_words))
     app.add_handler(CommandHandler("clear", clear_messages))
     app.add_handler(CommandHandler("clear_except", clear_except))
     

@@ -147,6 +147,60 @@ async def list_censored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @admin_or_owner
 @handle_errors
+async def whitelist_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /whitelist command - add whitelisted words."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/whitelist word1 word2`", parse_mode='Markdown')
+        return
+    chat_id = str(update.effective_chat.id)
+    raw = " ".join(context.args)
+    words = [w.strip().lower() for w in raw.replace(',', ' ').split() if w.strip()]
+    for word in words:
+        Database.add_whitelisted_word(chat_id, word)
+    await update.message.reply_text("✅ Whitelist updated.")
+
+
+@admin_or_owner
+@handle_errors
+async def list_whitelisted_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /whitelist_list command - list whitelisted words."""
+    chat_id = str(update.effective_chat.id)
+    words = Database.get_whitelisted_words(chat_id)
+    if not words:
+        await update.message.reply_text("📋 No whitelisted words in this chat.")
+        return
+    word_list = "\n".join([f"• `{w}`" for w in words])
+    await update.message.reply_text(f"✅ *Whitelisted Words:*\n\n{word_list}", parse_mode='Markdown')
+
+
+@admin_or_owner
+@handle_errors
+async def unwhitelist_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /unwhitelist command - remove words or clear all."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/unwhitelist word1 word2` or `/unwhitelist all`", parse_mode='Markdown')
+        return
+    chat_id = str(update.effective_chat.id)
+    # Handle clear
+    if len(context.args) == 1 and context.args[0].lower() == 'all':
+        if Database.clear_all_whitelisted_words(chat_id):
+            await update.message.reply_text("✅ All whitelisted words removed.")
+        else:
+            await update.message.reply_text("⚠️ No whitelisted words to remove.")
+        return
+    removed_any = False
+    for raw in context.args:
+        word = raw.strip().lower()
+        if Database.remove_whitelisted_word(chat_id, word):
+            removed_any = True
+    if removed_any:
+        await update.message.reply_text("✅ Whitelist updated.")
+    else:
+        await update.message.reply_text("⚠️ No specified words were found in the whitelist.")
+
+
+@admin_or_owner
+@handle_errors
 async def debug_censor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /debug_censor <text> or reply with /debug_censor - show which censor rules would match.
 

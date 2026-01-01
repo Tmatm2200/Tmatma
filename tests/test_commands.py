@@ -315,6 +315,38 @@ async def test_admin_can_set_spam_limit_and_mute(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_whitelist_prevents_deletes(monkeypatch):
+    """Whitelisted tokens present in a message prevent censor deletions."""
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.clear_all_censored_words(chat_id)
+    database.Database.clear_all_whitelisted_words(chat_id)
+
+    # Add censored token 'shit' (smart)
+    database.Database.add_censored_word(chat_id, 'shit', is_strict=False)
+    # Add whitelist token 'shittener'
+    database.Database.add_whitelisted_word(chat_id, 'shittener')
+
+    # Message containing whitelisted 'shittener' should NOT be deleted
+    from handlers.messages import check_censored_words
+    msg = DummyMessage(text='this is shittener', from_user=owner)
+    upd = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot)
+    deleted = await check_censored_words(upd, ctx, chat_id)
+    assert deleted is False
+
+    # Message containing 'shit' on its own SHOULD be deleted
+    msg2 = DummyMessage(text='this is shit', from_user=owner)
+    upd2 = DummyUpdate(msg2)
+    ctx2 = DummyContext(bot=bot)
+    deleted2 = await check_censored_words(upd2, ctx2, chat_id)
+    assert deleted2 is True
+
+
+@pytest.mark.asyncio
 async def test_spam_respects_custom_limit(monkeypatch):
     bot = DummyBot()
     owner = DummyUser(user_id=1)

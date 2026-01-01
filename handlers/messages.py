@@ -207,6 +207,17 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
     if not censored_words:
         return False
 
+    # If any whitelisted token is present in the normalized compact message, do not censor this message
+    whitelisted = Database.get_whitelisted_words(chat_id)
+    try:
+        for w in whitelisted:
+            w_norm = normalize_text(w, remove_non_alnum=True, collapse_repeats=True)
+            if w_norm and w_norm in normalized_compact:
+                logger.info(f"Skipping censor because whitelist token '{w}' found in chat {chat_id} user={update.effective_user.id} msg={update.message.message_id}")
+                return False
+    except Exception as e:
+        logger.debug(f"Error checking whitelist tokens: {e}")
+
     for word, is_strict in censored_words:
         word_norm = normalize_text(word, remove_non_alnum=True, collapse_repeats=True)
         word_norm_no_collapse = normalize_text(word, remove_non_alnum=True, collapse_repeats=False)

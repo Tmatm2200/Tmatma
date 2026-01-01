@@ -92,6 +92,11 @@ class Database:
                 antispam_enabled INTEGER DEFAULT 0,
                 spam_limit INTEGER DEFAULT 5,
                 spam_mute_minutes INTEGER DEFAULT 15
+            )""",
+            """CREATE TABLE IF NOT EXISTS whitelisted_words (
+                chat_id TEXT NOT NULL,
+                word TEXT NOT NULL,
+                UNIQUE(chat_id, word)
             )"""
         ]
         
@@ -109,6 +114,44 @@ class Database:
             pass
 
         logger.info("Database initialized successfully")
+
+    # --- Whitelisted Words ---
+    @staticmethod
+    def add_whitelisted_word(chat_id: str, word: str) -> bool:
+        """Add a whitelisted word (prevents deletions when present in a message)."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO whitelisted_words (chat_id, word) VALUES (?, ?)",
+            (chat_id, word)
+        )
+        return result is not None and result > 0
+
+    @staticmethod
+    def remove_whitelisted_word(chat_id: str, word: str) -> bool:
+        """Remove a whitelisted word."""
+        result = execute_query(
+            "DELETE FROM whitelisted_words WHERE chat_id = ? AND word = ?",
+            (chat_id, word)
+        )
+        return result is not None and result > 0
+
+    @staticmethod
+    def get_whitelisted_words(chat_id: str):
+        """Get all whitelisted words for a chat."""
+        result = execute_query(
+            "SELECT word FROM whitelisted_words WHERE chat_id = ?",
+            (chat_id,),
+            fetch_all=True
+        )
+        return [row[0] for row in result] if result else []
+
+    @staticmethod
+    def clear_all_whitelisted_words(chat_id: str) -> bool:
+        """Remove all whitelisted words for a chat."""
+        result = execute_query(
+            "DELETE FROM whitelisted_words WHERE chat_id = ?",
+            (chat_id,)
+        )
+        return result is not None and result > 0
     
     # --- Blocked Stickers ---
     @staticmethod
