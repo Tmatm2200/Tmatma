@@ -17,7 +17,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ `/help` - Show detailed help\n\n"
         
         "*Moderation:*\n"
-        "🧹 `/clear` 10 - Clear last N messages\n"
+        "🧹 `/clear 10` - Clear last N messages (also supports `/clear @username N`)\n"
         "🧹 `/clear_except` @user 10 - Clear except user\n\n"
         
         "*Sticker Control:*\n"
@@ -58,7 +58,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 *Detailed Command Guide*\n\n"
         
         "*Message Clearing:*\n"
-        "`/clear 20` - Delete last 20 messages\n"
+        "`/clear 20` - Delete last 20 messages (or `/clear @username 20`)\n"
         "`/clear_except @user1 @user2 15` - Delete 15 messages except from specified users\n\n"
         
         "*Sticker Blocking:*\n"

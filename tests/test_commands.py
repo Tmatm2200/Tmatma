@@ -192,6 +192,29 @@ async def test_clear_messages_and_except(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_admin_with_edit_permission_can_run_admin_cmds(monkeypatch):
+    """Administrators with edit permission can run admin-only commands."""
+    bot = DummyBot()
+    admin = DummyUser(user_id=222)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    # Simulate admin chat member with edit permission
+    member = MagicMock()
+    member.status = 'administrator'
+    member.can_delete_messages = False
+    member.can_edit_messages = True
+    bot.get_chat_member.return_value = member
+
+    # Try to block a set as admin
+    msg = DummyMessage(text="/block MySet", from_user=admin)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['MySet'])
+
+    await moderation.block_sticker(update, ctx)
+    assert database.Database.is_set_blocked(str(update.effective_chat.id), 'myset')
+
+
+@pytest.mark.asyncio
 async def test_antispam_and_message_checks(monkeypatch):
     bot = DummyBot()
     owner = DummyUser(user_id=1)
@@ -313,6 +336,80 @@ async def test_track_messages_and_blocked_sticker(monkeypatch):
     bot.delete_message = AsyncMock()
     deleted = await messages.check_blocked_sticker(update, ctx, str(1234))
     assert deleted is True
+
+
+@pytest.mark.asyncio
+async def test_clear_by_user(monkeypatch):
+    """`/clear @user N` deletes last N messages from specified user."""
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    from handlers.moderation import track_message, MESSAGE_HISTORY
+    MESSAGE_HISTORY.clear()
+
+    # Add messages: three from target, one from other
+    track_message(1234, 10, 111, 'target')
+    track_message(1234, 9, 111, 'target')
+    track_message(1234, 8, 222, 'other')
+    track_message(1234, 7, 111, 'target')
+
+    msg = DummyMessage(text='/clear @target 2', from_user=owner, chat_id=1234)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot, args=['@target', '2'])
+
+    bot.delete_message = AsyncMock()
+    await moderation.clear_messages(update, ctx)
+
+    # Ensure bot.delete_message was called twice with the two latest message IDs from target
+    called_ids = [call.args[1] for call in bot.delete_message.await_args_list]
+    assert set(called_ids) == {10, 9}
+
+
+@pytest.mark.asyncio
+async def test_admin_bypass_sticker_permissions(monkeypatch):
+    """Admins bypass sticker filter only if they have delete/edit permission."""
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.add_blocked_set(chat_id, 'blockedset')
+    database.Database.set_admin_bypass(chat_id, True)
+
+    class Sticker: pass
+    sticker = Sticker()
+    sticker.set_name = 'blockedset'
+
+    # Admin with permission should NOT have sticker deleted
+    admin_with_perm = DummyUser(user_id=222)
+    msg1 = DummyMessage(sticker=sticker, from_user=admin_with_perm)
+    update1 = DummyUpdate(msg1)
+    ctx1 = DummyContext(bot=bot)
+
+    member = MagicMock()
+    member.status = 'administrator'
+    member.can_delete_messages = True
+    member.can_edit_messages = False
+    bot.get_chat_member.return_value = member
+
+    await messages.handle_messages(update1, ctx1)
+    assert msg1._deleted is False
+
+    # Admin without permission should have sticker deleted
+    admin_no_perm = DummyUser(user_id=333)
+    msg2 = DummyMessage(sticker=sticker, from_user=admin_no_perm)
+    update2 = DummyUpdate(msg2)
+    ctx2 = DummyContext(bot=bot)
+
+    member2 = MagicMock()
+    member2.status = 'administrator'
+    member2.can_delete_messages = False
+    member2.can_edit_messages = False
+    bot.get_chat_member.return_value = member2
+
+    await messages.handle_messages(update2, ctx2)
+    assert msg2._deleted is True
 
 
 # End of tests

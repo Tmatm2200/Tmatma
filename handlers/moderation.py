@@ -171,24 +171,43 @@ async def uncensor_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @admin_or_owner
 @handle_errors
 async def clear_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /clear command - delete last N messages."""
+    """Handle /clear command - delete last N messages.
+
+    Usage:
+    - `/clear 10` - delete last 10 messages
+    - `/clear @username 5` - delete last 5 messages from @username
+    - `/clear @username` - delete last 10 messages from @username (default)
+    """
     count = 10  # Default
-    
-    if context.args and context.args[0].isdigit():
-        count = min(int(context.args[0]), MAX_CLEAR_COUNT)
-    
+    target_user = None
+
+    # Parse args: support `/clear @username [count]` or `/clear <count>`
+    if context.args:
+        # Clear messages for a specific user by username
+        if context.args[0].startswith('@'):
+            target_user = context.args[0].replace('@', '').lower()
+            count = next((int(arg) for arg in context.args[1:] if arg.isdigit()), 10)
+            count = min(count, MAX_CLEAR_COUNT)
+        # Clear last N messages
+        elif context.args[0].isdigit():
+            count = min(int(context.args[0]), MAX_CLEAR_COUNT)
+
     chat_id = update.effective_chat.id
-    
-    # Get messages from this chat
-    chat_messages = [m for m in MESSAGE_HISTORY if m[0] == chat_id]
+
+    # Get messages from this chat (optionally filter by user)
+    if target_user:
+        chat_messages = [m for m in MESSAGE_HISTORY if m[0] == chat_id and m[3] == target_user]
+    else:
+        chat_messages = [m for m in MESSAGE_HISTORY if m[0] == chat_id]
+
     chat_messages.sort(key=lambda x: x[1], reverse=True)
-    
+
     # Delete command message
     try:
         await update.message.delete()
     except:
         pass
-    
+
     # Delete messages
     deleted = 0
     for msg_data in chat_messages[:count]:
@@ -198,9 +217,15 @@ async def clear_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             continue
         await asyncio.sleep(0.05)  # Rate limiting
-    
+
     # Send status message and auto-delete
-    status_msg = await update.effective_chat.send_message(f"🗑️ Deleted {deleted} messages.")
+    if target_user:
+        status_msg = await update.effective_chat.send_message(
+            f"🗑️ Deleted {deleted} messages from @{target_user}."
+        )
+    else:
+        status_msg = await update.effective_chat.send_message(f"🗑️ Deleted {deleted} messages.")
+
     await asyncio.sleep(2)
     try:
         await status_msg.delete()

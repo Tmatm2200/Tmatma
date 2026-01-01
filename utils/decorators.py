@@ -58,20 +58,20 @@ def admin_or_owner(func):
         if status == "creator":
             return await func(update, context)
         
-        # Check if admin has delete permission
+        # Check if admin has delete or edit permission
         if status == "administrator":
             try:
                 member = await context.bot.get_chat_member(
                     update.effective_chat.id,
                     user_id
                 )
-                if member.can_delete_messages:
+                if getattr(member, 'can_delete_messages', False) or getattr(member, 'can_edit_messages', False):
                     return await func(update, context)
             except Exception as e:
                 logger.error(f"Failed to check admin permissions: {e}")
         
         await update.message.reply_text(
-            "❌ You need to be an admin with message deletion permission."
+            "❌ You need to be an admin with message deletion or edit permission."
         )
     
     return wrapper
