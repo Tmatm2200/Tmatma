@@ -159,9 +159,9 @@ def normalize_text(text: str, remove_non_alnum: bool = True, collapse_repeats: b
         # Replace runs of non-alnum with a single placeholder space (to simplify regex matching)
         s = re.sub(rf'[^a-z0-9{arabic_range}]+', ' ', s)
 
-    # Collapse repeated characters (e.g., shiiit -> shit)
-    # Collapse repeated characters (e.g., shiiit -> shit)
-    s = re.sub(r'(.)\1+', r'\1', s)
+    # Collapse repeated characters (e.g., shiiit -> shit) when requested
+    if collapse_repeats:
+        s = re.sub(r'(.)\1+', r'\1', s)
 
     # If Arabic letters exist, also collapse repeated combining marks/spaces
     if re.search(r'[\u0600-\u06FF]', s):

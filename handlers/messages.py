@@ -191,8 +191,10 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
         # (e.g., 'خخخخخ'), treat it as a run match and require at least that many
         # consecutive characters in the incoming message. This avoids collapsing
         # repeats and matching single characters.
+        has_repeats_in_word = False
         try:
             for m in re.finditer(r'(.)\1+', word_norm_no_collapse):
+                has_repeats_in_word = True
                 ch = m.group(1)
                 run_len = m.end() - m.start()
                 # Check for run in the message (compact, no collapse so repeats preserved)
@@ -204,6 +206,12 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                         pass
         except Exception:
             pass
+
+        # If the censored token included repeated runs but we didn't find a
+        # matching long run in the message, continue to next censored token
+        # to avoid matching a collapsed version (which would match a single char).
+        if has_repeats_in_word:
+            continue
 
         # Smart match:
         # If purely numeric, do substring match in compact normalized
