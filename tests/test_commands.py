@@ -561,6 +561,28 @@ async def test_censor_leetspeak_and_separators(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_no_subsequence_on_arabic(monkeypatch):
+    """Ensure subsequence fallback does not run for Arabic-script censored tokens (avoids false positives)."""
+    bot = DummyBot()
+    user = DummyUser(user_id=111)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.clear_all_censored_words(chat_id)
+    database.Database.add_censored_word(chat_id, 'بضان', False)
+
+    # A natural Arabic sentence that should NOT trigger deletion for the token 'بضان'
+    msg = DummyMessage(text='اقدر افتح المنطقة بالطيران صح؟', from_user=user, message_id=500, chat_id=1234)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot)
+    deleted = await messages.check_censored_words(update, ctx, chat_id)
+    assert deleted is False
+
+    # Cleanup
+    database.Database.remove_censored_word(chat_id, 'بضان')
+
+
+@pytest.mark.asyncio
 async def test_clear_by_user(monkeypatch):
     """`/clear @user N` deletes last N messages from specified user."""
     bot = DummyBot()

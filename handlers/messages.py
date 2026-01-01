@@ -332,7 +332,10 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 # sufficiently concentrated (to avoid matching across unrelated long strings).
                 try:
                     MIN_SUBSEQ_LEN = 4
-                    if len(word_norm) >= MIN_SUBSEQ_LEN:
+                    # Skip subsequence fallback for Arabic-script tokens to avoid false positives
+                    # (Arabic text often contains many repeating characters/roots and long sentences
+                    #  which can accidentally match subsequences spread across words).
+                    if len(word_norm) >= MIN_SUBSEQ_LEN and not re.search(r'[\u0600-\u06FF]', word_norm):
                         # Build a compacted searchable text (letters and digits and arabic letters only)
                         text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
                         # Track matched count *and* positions to ensure matches are close together
