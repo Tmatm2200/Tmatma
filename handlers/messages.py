@@ -130,32 +130,71 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
     """
     Check if message contains censored words and delete if needed.
     Returns True if message was deleted.
+
+    Uses normalization and permissive regex matching to catch obfuscated words
+    (e.g., 'sh!t', 's.h.i.t', '5h1t', 'shiiit').
     """
-    text = update.message.text.lower()
+    from utils.helpers import normalize_text
+
+    raw_text = update.message.text or ""
+    # Normalized versions of the message
+    normalized_compact = normalize_text(raw_text, remove_non_alnum=True)
+    normalized_preserve = normalize_text(raw_text, remove_non_alnum=False)
+
     censored_words = Database.get_censored_words(chat_id)
-    
     if not censored_words:
         return False
-    
+
     for word, is_strict in censored_words:
-        # Strict match: exact phrase anywhere in text
+        word_norm = normalize_text(word, remove_non_alnum=True)
+
+        # Strict match: normalized substring anywhere in compact normalized message
         if is_strict:
-            if word in text:
+            if word_norm and word_norm in normalized_compact:
                 try:
                     await update.message.delete()
                     return True
                 except:
                     pass
-        # Smart match: whole word boundaries
-        else:
-            pattern = rf"\b{re.escape(word)}\b"
-            if re.search(pattern, text):
+            continue
+
+        # Smart match:
+        # If purely numeric, do substring match in compact normalized
+        if word_norm.isdigit():
+            if word_norm and word_norm in normalized_compact:
                 try:
                     await update.message.delete()
                     return True
                 except:
                     pass
-    
+            continue
+
+        # Otherwise, build permissive regex from normalized word that allows
+        # non-alphanumeric separators between characters and check against the
+        # normalized_preserve form (which has separators preserved as spaces).
+        if word_norm:
+            try:
+                # Build pattern like: s[^a-z0-900-FF]*h[^a-z0-900-FF]*...
+                # Use a character class that includes Arabic letters and digits
+                parts = [re.escape(ch) for ch in word_norm]
+                sep_class = r"[^a-z0-9\u0600-\u06FF]*"
+                pattern = r"".join(p + sep_class for p in parts)
+                if re.search(pattern, normalized_preserve):
+                    try:
+                        await update.message.delete()
+                        return True
+                    except:
+                        pass
+                # Fallback: compact substring check
+                if word_norm in normalized_compact:
+                    try:
+                        await update.message.delete()
+                        return True
+                    except:
+                        pass
+            except Exception:
+                pass
+
     return False
 
 

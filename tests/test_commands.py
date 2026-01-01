@@ -339,6 +339,72 @@ async def test_track_messages_and_blocked_sticker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_censor_numeric_substring_match(monkeypatch):
+    """Censoring '6' should also block '69' (numeric substring match)."""
+    bot = DummyBot()
+    user = DummyUser(user_id=111)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.add_censored_word(chat_id, '6', False)
+
+    msg = DummyMessage(text='69', from_user=user, message_id=42, chat_id=1234)
+    update = DummyUpdate(msg)
+    ctx = DummyContext(bot=bot)
+
+    await messages.handle_messages(update, ctx)
+    assert msg._deleted is True
+
+    # Cleanup
+    database.Database.uncensor_word(chat_id, '6')
+
+
+@pytest.mark.asyncio
+async def test_censor_leetspeak_and_separators(monkeypatch):
+    """Ensure obfuscated/leet/pros-separated variants are caught for a word."""
+    bot = DummyBot()
+    user = DummyUser(user_id=111)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    database.Database.add_censored_word(chat_id, 'shit', False)
+
+    variants = ['sh!t', 's.h.i.t', '5h1t', 's h i t', 'shiiit']
+    for i, variant in enumerate(variants, start=1):
+        msg = DummyMessage(text=variant, from_user=user, message_id=100 + i, chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        # Reset deleted flag
+        msg._deleted = False
+        await messages.handle_messages(update, ctx)
+        assert msg._deleted is True, f"Variant {variant} was not deleted"
+
+    # Arabic variants
+    database.Database.add_censored_word(chat_id, 'لعنة', False)
+    arabic_variants = ['لعنة', 'ل@ع#ن%ة', 'ل ع ن ة', 'لّعنَة']
+    for i, variant in enumerate(arabic_variants, start=1):
+        msg = DummyMessage(text=variant, from_user=user, message_id=200 + i, chat_id=1234)
+        update = DummyUpdate(msg)
+        ctx = DummyContext(bot=bot)
+        msg._deleted = False
+        await messages.handle_messages(update, ctx)
+        assert msg._deleted is True, f"Arabic variant {variant} was not deleted"
+
+    # Arabic numeric test: censoring '٦' should block '٦٩'
+    database.Database.add_censored_word(chat_id, '٦', False)
+    msg_num = DummyMessage(text='٦٩', from_user=user, message_id=300, chat_id=1234)
+    update_num = DummyUpdate(msg_num)
+    ctx_num = DummyContext(bot=bot)
+    await messages.handle_messages(update_num, ctx_num)
+    assert msg_num._deleted is True
+
+    # Cleanup
+    database.Database.remove_censored_word(chat_id, 'shit')
+    database.Database.remove_censored_word(chat_id, 'لعنة')
+    database.Database.remove_censored_word(chat_id, '٦')
+
+
+@pytest.mark.asyncio
 async def test_clear_by_user(monkeypatch):
     """`/clear @user N` deletes last N messages from specified user."""
     bot = DummyBot()
