@@ -10,7 +10,11 @@ from utils.decorators import owner_only, handle_errors
 @owner_only
 @handle_errors
 async def admins_enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /admins_enable - allow admins to bypass filters."""
+    """Handle /admins_enable - allow admins to bypass filters.
+
+    Note: when enabled, only chat creators or administrators that have
+    the delete/edit message permissions will be able to bypass filters.
+    """
     chat_id = str(update.effective_chat.id)
     Database.set_admin_bypass(chat_id, True)
     await update.message.reply_text("✅ Admins can now bypass sticker blocks and word filters.")

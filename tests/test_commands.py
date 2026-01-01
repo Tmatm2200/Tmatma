@@ -238,6 +238,56 @@ async def test_admins_enable_disable(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_admin_bypass_requires_permissions(monkeypatch):
+    """Admins can bypass only if they have delete or edit message permission."""
+    bot = DummyBot()
+    owner = DummyUser(user_id=1)
+    monkeypatch.setattr('utils.decorators.ADMIN_ID', 1)
+
+    chat_id = str(1234)
+    # Enable admin bypass for the chat
+    database.Database.set_admin_bypass(chat_id, True)
+
+    # Case 1: admin with delete permission -> should bypass (message not deleted)
+    admin_with_perm = DummyUser(user_id=222)
+    msg1 = DummyMessage(text='badword', from_user=admin_with_perm)
+    update1 = DummyUpdate(msg1)
+    ctx1 = DummyContext(bot=bot)
+
+    # Simulate chat member response with permissions
+    member = MagicMock()
+    member.status = 'administrator'
+    member.can_delete_messages = True
+    member.can_edit_messages = False
+    bot.get_chat_member.return_value = member
+
+    # Add a censored word so handler will attempt to delete
+    database.Database.add_censored_word(chat_id, 'badword', False)
+
+    # Run messages handler; because admin has permission, message should NOT be deleted
+    await messages.handle_messages(update1, ctx1)
+    assert msg1._deleted is False
+
+    # Case 2: admin without delete/edit permission -> should NOT bypass (message deleted)
+    admin_no_perm = DummyUser(user_id=333)
+    msg2 = DummyMessage(text='badword', from_user=admin_no_perm, message_id=2)
+    update2 = DummyUpdate(msg2)
+    ctx2 = DummyContext(bot=bot)
+
+    member2 = MagicMock()
+    member2.status = 'administrator'
+    member2.can_delete_messages = False
+    member2.can_edit_messages = False
+    bot.get_chat_member.return_value = member2
+
+    await messages.handle_messages(update2, ctx2)
+    assert msg2._deleted is True
+
+    # Cleanup censored words
+    database.Database.uncensor_word(chat_id, 'badword')
+
+
+@pytest.mark.asyncio
 async def test_track_messages_and_blocked_sticker(monkeypatch):
     # Track message
     from handlers.moderation import track_message, MESSAGE_HISTORY

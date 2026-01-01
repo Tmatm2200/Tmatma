@@ -32,10 +32,26 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- 2. CHECK PERMISSIONS ---
     status = await get_user_status(update, context)
     is_admin_bypass = Database.is_admin_bypass_enabled(chat_id)
-    user_can_bypass = (
-        user_id == ADMIN_ID or 
-        (is_admin_bypass and status in ("administrator", "creator"))
-    )
+
+    # Allow bot owner always
+    user_can_bypass = user_id == ADMIN_ID
+
+    # If admin bypass is enabled, only allow creators or administrators
+    # who have message delete or edit permissions to bypass filters.
+    if not user_can_bypass and is_admin_bypass and status in ("administrator", "creator"):
+        if status == "creator":
+            user_can_bypass = True
+        else:
+            try:
+                member = await context.bot.get_chat_member(
+                    update.effective_chat.id, user_id
+                )
+                # Require at least one of delete/edit permissions
+                if getattr(member, 'can_delete_messages', False) or getattr(member, 'can_edit_messages', False):
+                    user_can_bypass = True
+            except Exception:
+                # If we can't verify permissions, do not allow bypass
+                pass
     
     # --- 3. STICKER BLOCKING ---
     if message.sticker and not user_can_bypass:
@@ -182,7 +198,22 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
                 except:
                     pass
             return
-        
+
+    
+    # --- PUBLIC RESPONSES ---
+    # Mention specific user
+    if "يا جلنف" in text:
+        target_id = 1979054413
+        await update.message.reply_text(
+            f"يا [جلنف](tg://user?id={target_id})",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if "مين الجلنف" in text or "جلنف" in text:
+        await update.message.reply_text("رفصو")
+        return
+    
         if text.strip() in ("شاطرة", "شاطرة يالبوتة"):
             # Try to set a reaction if supported; fallback to sending emoji text
             try:
@@ -202,25 +233,11 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
                 except:
                     pass
             return
-    
-    # --- PUBLIC RESPONSES ---
-    # Mention specific user
-    if "يا جلن" in text:
-        target_id = 1979054413
-        await update.message.reply_text(
-            f"يا [الجلن](tg://user?id={target_id})",
-            parse_mode='Markdown'
-        )
-        return
-    
-    if "مين الجلن" in text or "جلن" in text:
-        await update.message.reply_text("رفصو")
-        return
-    
+
     # Randomized responses
     random_responses = {
         ("يالبوت بتحبي يالبوت", "بتحبي يالبوت يالبوتة"): ["يع", "لا"],
-        ("يالبوتة",): ["ايه", "لا", "نعم", "اتكل علي الله", "يع", "غور", "خش نام", "بس يا جلن", "أقل جلن"],
+        ("يالبوتة", "يا بنته"): ["ايه", "لا", "نعم", "اتكل علي الله", "يع", "غور", "خش نام", "بس يا جلنف", "أقل جلنف", "فاك يو"],
         ("شتاينز",): ["شتاينز الأعظم", "عمك"]
     }
     

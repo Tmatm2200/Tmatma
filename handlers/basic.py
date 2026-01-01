@@ -35,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "😴 `/antispam_disable` - Disable\n\n"
         
         "*Admin Settings:* (Owner Only)\n"
-        "🔓 `/admins_enable` - Admins bypass filters\n"
+        "🔓 `/admins_enable` - Admins bypass filters (only admins with delete/edit message permission)\n"
         "🔒 `/admins_disable` - Admins follow rules"
     )
     await update.message.reply_text(text, parse_mode='Markdown')
@@ -78,7 +78,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Commands: `/antispam_enable` and `/antispam_disable`\n\n"
         
         "*Admin Bypass:*\n"
-        "When enabled, admins can bypass sticker blocks and word filters.\n"
+        "When enabled, admins with delete/edit message permission can bypass sticker blocks and word filters.\n"
         "Owner-only: `/admins_enable` and `/admins_disable`"
     )
     await update.message.reply_text(text, parse_mode='Markdown')
