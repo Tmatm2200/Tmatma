@@ -24,7 +24,8 @@ from handlers.moderation import (
     block_sticker, unblock_sticker, list_blocked_sets,
     censor_word, uncensor_word, list_censored_words,
     clear_messages, clear_except,
-    antispam_enable, antispam_disable
+    antispam_enable, antispam_disable,
+    antispam_set_limit, antispam_set_mute
 )
 from handlers.admin import admins_enable, admins_disable
 from handlers.messages import handle_messages, track_messages
