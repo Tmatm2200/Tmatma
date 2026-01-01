@@ -108,10 +108,20 @@ async def censor_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Extract regular words (smart matching)
     remaining = re.sub(r'"[^"]+"', '', raw)
     regular_words = [w.strip().lower() for w in remaining.replace(',', ' ').split() if w.strip()]
+    skipped = []
     for word in regular_words:
+        # Prevent adding single-character censored tokens, which are prone to false positives
+        if len(word) < 2:
+            skipped.append(word)
+            continue
         Database.add_censored_word(chat_id, word, is_strict=False)
-    
-    await update.message.reply_text("✅ Word filter updated.")
+
+    if skipped:
+        await update.message.reply_text(
+            f"✅ Word filter updated. Skipped too-short tokens: {', '.join(skipped)}"
+        )
+    else:
+        await update.message.reply_text("✅ Word filter updated.")
 
 
 @admin_or_owner
@@ -133,6 +143,129 @@ async def list_censored_words(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"🛡️ *Censored Words:*\n\n{word_list}",
         parse_mode='Markdown'
     )
+
+
+@admin_or_owner
+@handle_errors
+async def debug_censor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /debug_censor <text> or reply with /debug_censor - show which censor rules would match.
+
+    This command does NOT delete messages; it returns diagnostic information about
+    normalization and which censored tokens (if any) would trigger deletion and by
+    which matching strategy.
+    """
+    from utils.helpers import normalize_text
+
+    # Determine text to analyze: args take precedence, otherwise use replied-to message
+    if context.args:
+        raw = " ".join(context.args)
+    elif update.message.reply_to_message and update.message.reply_to_message.text:
+        raw = update.message.reply_to_message.text
+    else:
+        await update.message.reply_text("❌ Usage: `/debug_censor <text>` or reply to a message with `/debug_censor`", parse_mode='Markdown')
+        return
+
+    chat_id = str(update.effective_chat.id)
+    text = raw or ""
+
+    normalized_compact = normalize_text(text, remove_non_alnum=True, collapse_repeats=True)
+    normalized_preserve = normalize_text(text, remove_non_alnum=False, collapse_repeats=False)
+    normalized_compact_no_collapse = normalize_text(text, remove_non_alnum=True, collapse_repeats=False)
+
+    censored_words = Database.get_censored_words(chat_id)
+
+    parts = [f"*Input:* `{text}`", f"*Normalized (compact):* `{normalized_compact}`", f"*Normalized (preserve):* `{normalized_preserve}`", ""]
+
+    if not censored_words:
+        parts.append("No censored words configured for this chat.")
+        await update.message.reply_text("\n".join(parts), parse_mode='Markdown')
+        return
+
+    matched_any = False
+    for word, is_strict in censored_words:
+        word_norm = normalize_text(word, remove_non_alnum=True, collapse_repeats=True)
+        word_norm_no_collapse = normalize_text(word, remove_non_alnum=True, collapse_repeats=False)
+        info = [f"• `{word}` {'(Strict)' if is_strict else '(Smart)'} --> norm: `{word_norm}`"]
+
+        # Strict
+        if is_strict and word_norm and word_norm in normalized_compact:
+            info.append("  - Strict match: YES")
+            matched_any = True
+            parts.append("\n".join(info))
+            continue
+        elif is_strict:
+            info.append("  - Strict match: NO")
+
+        # Repeated-run
+        has_repeats_in_word = False
+        try:
+            for m in re.finditer(r'(.)\1+', word_norm_no_collapse):
+                has_repeats_in_word = True
+                ch = m.group(1)
+                run_len = m.end() - m.start()
+                if re.search(fr'{re.escape(ch)}' + r'{' + f'{run_len},' + r'}', normalized_compact_no_collapse):
+                    info.append(f"  - Repeated-run match: YES (char `{ch}` run >= {run_len})")
+                    matched_any = True
+                else:
+                    info.append(f"  - Repeated-run match: NO (need run >= {run_len})")
+        except Exception as e:
+            info.append(f"  - Repeated-run check failed: {e}")
+
+        if has_repeats_in_word:
+            parts.append("\n".join(info))
+            continue
+
+        # Numeric substring
+        if word_norm.isdigit():
+            info.append(f"  - Numeric substring in compact: {'YES' if (word_norm and word_norm in normalized_compact) else 'NO'}")
+            if word_norm and word_norm in normalized_compact:
+                matched_any = True
+            parts.append("\n".join(info))
+            continue
+
+        # Permissive regex against preserved form
+        try:
+            parts_chars = [re.escape(ch) for ch in word_norm]
+            sep_class = r"[^a-z0-9\u0600-\u06FF]*"
+            pattern = r"".join(p + sep_class for p in parts_chars)
+            regex_match = bool(re.search(pattern, normalized_preserve))
+            compact_match = bool(word_norm and word_norm in normalized_compact)
+
+            info.append(f"  - Permissive regex match (preserve): {'YES' if regex_match else 'NO'}")
+            info.append(f"  - Compact substring match: {'YES' if compact_match else 'NO'}")
+
+            # Subsequence fallback (limited to length >=3)
+            subseq_info = "N/A"
+            if len(word_norm) >= 3:
+                text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
+                matched = 0
+                pos = 0
+                for ch in word_norm:
+                    idx = text_compacted.find(ch, pos)
+                    if idx != -1:
+                        matched += 1
+                        pos = idx + 1
+                subseq_match = matched >= max(1, len(word_norm) - 1)
+                subseq_info = f"YES (matched {matched}/{len(word_norm)})" if subseq_match else f"NO (matched {matched}/{len(word_norm)})"
+                if subseq_match:
+                    matched_any = True
+            info.append(f"  - Subsequence fallback: {subseq_info}")
+
+            if regex_match or compact_match:
+                matched_any = True
+        except Exception as e:
+            info.append(f"  - Regex/subsequence check failed: {e}")
+
+        parts.append("\n".join(info))
+
+    if not matched_any:
+        parts.append("\nNo censor rules matched this input.")
+
+    # Send result (avoid overly long messages)
+    msg = "\n\n".join(parts)
+    if len(msg) > 3500:
+        msg = msg[:3500] + "\n... (output truncated)"
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 
 @admin_or_owner

@@ -25,7 +25,8 @@ from handlers.moderation import (
     censor_word, uncensor_word, list_censored_words,
     clear_messages, clear_except,
     antispam_enable, antispam_disable,
-    antispam_set_limit, antispam_set_mute
+    antispam_set_limit, antispam_set_mute,
+    debug_censor
 )
 from handlers.admin import admins_enable, admins_disable
 from handlers.messages import handle_messages, track_messages
@@ -61,6 +62,7 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("antispam_disable", antispam_disable))
     app.add_handler(CommandHandler("antispam_set_limit", antispam_set_limit))
     app.add_handler(CommandHandler("antispam_set_mute", antispam_set_mute))
+    app.add_handler(CommandHandler("debug_censor", debug_censor))
     
     # Admin commands
     app.add_handler(CommandHandler("admins_enable", admins_enable))

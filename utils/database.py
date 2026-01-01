@@ -97,7 +97,17 @@ class Database:
         
         for query in queries:
             execute_query(query)
-        
+
+        # Migrate older databases: ensure spam_limit and spam_mute_minutes columns exist
+        try:
+            execute_query("ALTER TABLE chat_settings ADD COLUMN spam_limit INTEGER DEFAULT 5")
+        except Exception:
+            pass
+        try:
+            execute_query("ALTER TABLE chat_settings ADD COLUMN spam_mute_minutes INTEGER DEFAULT 15")
+        except Exception:
+            pass
+
         logger.info("Database initialized successfully")
     
     # --- Blocked Stickers ---

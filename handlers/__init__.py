@@ -11,7 +11,10 @@ from .moderation import (
     clear_messages,
     clear_except,
     antispam_enable,
-    antispam_disable
+    antispam_disable,
+    antispam_set_limit,
+    antispam_set_mute,
+    debug_censor
 )
 from .admin import admins_enable, admins_disable
 from .messages import handle_messages, track_messages
@@ -31,6 +34,7 @@ __all__ = [
     'antispam_disable',
     'antispam_set_limit',
     'antispam_set_mute',
+    'debug_censor',
     'admins_enable',
     'admins_disable',
     'handle_messages',

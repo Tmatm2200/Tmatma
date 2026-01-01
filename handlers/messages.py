@@ -1,6 +1,7 @@
 """
 Message handlers for filtering and auto-responses.
 """
+import logging
 import re
 import time
 import random
@@ -10,6 +11,8 @@ from telegram.ext import ContextTypes
 from config import ADMIN_ID, SPAM_MESSAGE_LIMIT, SPAM_TIME_WINDOW, ENABLE_ARABIC_RESPONSES
 from utils.database import Database
 from utils.decorators import get_user_status
+
+logger = logging.getLogger(__name__)
 
 # Spam tracking: {(chat_id, user_id): [(message_id, timestamp), ...]}
 SPAM_TRACKER = defaultdict(list)
@@ -94,35 +97,58 @@ async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
 
     # Check if spam limit exceeded
     if len(SPAM_TRACKER[key]) > limit:
+        logger.info(f"Spam threshold exceeded for user {user_id} in chat {chat_id}: {len(SPAM_TRACKER[key])} messages (limit {limit})")
         # Delete all messages except the first one
+        deleted_count = 0
         for mid, _ in SPAM_TRACKER[key][1:]:
             try:
                 await context.bot.delete_message(chat_id, mid)
-            except:
-                pass
-        
+                deleted_count += 1
+            except Exception as e:
+                logger.debug(f"Failed to delete spam message {mid} in chat {chat_id}: {e}")
+        logger.info(f"Deleted {deleted_count} spam messages for user {user_id} in chat {chat_id}")
+
         # Keep only first message in tracker
         SPAM_TRACKER[key] = [SPAM_TRACKER[key][0]]
 
         # Mute the user for configured duration (disallow messages and media)
         try:
             until_ts = int(time.time() + mute_minutes * 60)
+            # Build restrictive ChatPermissions (fields vary between PTB versions)
             permissions = ChatPermissions(
                 can_send_messages=False,
-                can_send_media_messages=False,
                 can_send_polls=False,
-                can_send_other_messages=False,
-                can_add_web_page_previews=False
+                can_send_other_messages=False
             )
             # Use bot.restrict_chat_member to mute
-            await context.bot.restrict_chat_member(chat_id, user_id, permissions=permissions, until_date=until_ts)
-            # Notify chat (best-effort)
             try:
-                await context.bot.send_message(chat_id, f"🔇 User has been muted for {mute_minutes} minutes due to spam.")
-            except:
-                pass
-        except Exception:
-            pass
+                # Verify bot has restrict capability (best-effort); avoid silent failures
+                try:
+                    bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
+                    can_restrict = getattr(bot_member, 'can_restrict_members', False)
+                except Exception as e:
+                    logger.debug(f"Could not verify bot's chat member permissions: {e}")
+                    can_restrict = True  # assume True and attempt; we'll catch errors below
+
+                if not can_restrict:
+                    logger.warning(f"Bot lacks restrict permissions in chat {chat_id}; cannot mute user {user_id}")
+                    try:
+                        await context.bot.send_message(chat_id, "⚠️ I don't have permission to mute users in this chat. Please grant 'Restrict members' admin permission.")
+                    except Exception:
+                        pass
+                else:
+                    await context.bot.restrict_chat_member(chat_id, user_id, permissions=permissions, until_date=until_ts)
+                    logger.info(f"Muted user {user_id} in chat {chat_id} for {mute_minutes} minutes")
+                    # Notify chat (best-effort)
+                    try:
+                        await context.bot.send_message(chat_id, f"🔇 User has been muted for {mute_minutes} minutes due to spam.")
+                    except Exception as e:
+                        logger.debug(f"Failed to send mute notification: {e}")
+            except Exception as e:
+                # Log error so we can see why mute isn't applied (missing permissions, etc.)
+                logger.exception(f"Failed to mute user {user_id} in chat {chat_id}: {e}")
+        except Exception as e:
+            logger.exception(f"Unexpected error when muting user {user_id}: {e}")
 
         return True
     
@@ -181,10 +207,11 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
         if is_strict:
             if word_norm and word_norm in normalized_compact:
                 try:
+                    logger.info(f"Censor matched '{word}' via strict match in chat {chat_id}")
                     await update.message.delete()
                     return True
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to delete message after strict match: {e}")
             continue
 
         # Special handling: if the censored token contains repeated characters
@@ -200,10 +227,11 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 # Check for run in the message (compact, no collapse so repeats preserved)
                 if re.search(fr'{re.escape(ch)}' + r'{' + f'{run_len},' + r'}', normalized_compact_no_collapse):
                     try:
+                        logger.info(f"Censor matched '{word}' via repeated-run match in chat {chat_id}")
                         await update.message.delete()
                         return True
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to delete message after repeated-run match: {e}")
         except Exception:
             pass
 
@@ -218,10 +246,11 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
         if word_norm.isdigit():
             if word_norm and word_norm in normalized_compact:
                 try:
+                    logger.info(f"Censor matched '{word}' via numeric substring in chat {chat_id}")
                     await update.message.delete()
                     return True
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to delete message after numeric substring match: {e}")
             continue
 
         # Otherwise, build permissive regex from normalized word that allows
@@ -236,41 +265,45 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 pattern = r"".join(p + sep_class for p in parts)
                 if re.search(pattern, normalized_preserve):
                     try:
+                        logger.info(f"Censor matched '{word}' via permissive regex in chat {chat_id}")
                         await update.message.delete()
                         return True
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to delete message after regex match: {e}")
                 # Fallback: compact substring check
                 if word_norm in normalized_compact:
                     try:
+                        logger.info(f"Censor matched '{word}' via compact substring in chat {chat_id}")
                         await update.message.delete()
                         return True
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to delete message after compact substring match: {e}")
 
-                # Additional fallback: subsequence match allowing at most one missing
-                # character (useful for obfuscations where letters are omitted
-                # but order is preserved, e.g., 's#h$t' -> 's h t' should match 'shit').
+                # Additional fallback (restricted): subsequence match allowing at most one missing
+                # character — only applied to words of reasonable length to avoid false positives.
                 try:
-                    # Build a compacted searchable text (letters and digits and arabic letters only)
-                    text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
-                    # Count matched characters of word_norm as ordered subsequence
-                    matched = 0
-                    pos = 0
-                    for ch in word_norm:
-                        idx = text_compacted.find(ch, pos)
-                        if idx != -1:
-                            matched += 1
-                            pos = idx + 1
-                    # Allow at most one missing character
-                    if matched >= max(1, len(word_norm) - 1):
-                        try:
-                            await update.message.delete()
-                            return True
-                        except:
-                            pass
-                except Exception:
-                    pass
+                    MIN_SUBSEQ_LEN = 3
+                    if len(word_norm) >= MIN_SUBSEQ_LEN:
+                        # Build a compacted searchable text (letters and digits and arabic letters only)
+                        text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
+                        # Count matched characters of word_norm as ordered subsequence
+                        matched = 0
+                        pos = 0
+                        for ch in word_norm:
+                            idx = text_compacted.find(ch, pos)
+                            if idx != -1:
+                                matched += 1
+                                pos = idx + 1
+                        # Allow at most one missing character
+                        if matched >= max(1, len(word_norm) - 1):
+                            try:
+                                logger.info(f"Censor matched '{word}' via subsequence fallback in chat {chat_id}")
+                                await update.message.delete()
+                                return True
+                            except Exception as e:
+                                logger.debug(f"Failed to delete message after subsequence match: {e}")
+                except Exception as e:
+                    logger.exception(f"Error during subsequence fallback: {e}")
             except Exception:
                 pass
 
