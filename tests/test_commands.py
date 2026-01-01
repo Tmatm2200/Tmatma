@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from handlers import basic, moderation, messages, admin, messages as messages_module
+from handlers.messages import SPAM_TRACKER, check_spam
 from utils import database
 from config import ADMIN_ID
 
@@ -274,7 +275,7 @@ async def test_spam_triggers_mute(monkeypatch):
         # On trigger, check that restrict_chat_member has been called
         if i > 5:
             assert deleted is True
-                    assert bot.restrict_chat_member.await_count >= 1
+            assert bot.restrict_chat_member.await_count >= 1
             break
 
 
