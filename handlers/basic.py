@@ -31,8 +31,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛡️ `/censor_list` - Show censored words\n\n"
         
         "*Anti-Spam:*\n"
-        "🚨 `/antispam_enable` - Enable (6 msgs/10s)\n"
-        "😴 `/antispam_disable` - Disable\n\n"
+        "🚨 `/antispam_enable` - Enable (5 msgs/10s)\n"
+        "😴 `/antispam_disable` - Disable\n"
+        "⚙️ `/antispam_limit <count>` - Set message limit\n"
+        "🔧 `/antispam_penalty <minutes>` - Set mute penalty\n\n"
         
         "*Admin Settings:* (Owner Only)\n"
         "🔓 `/admins_enable` - Admins bypass filters (only admins with delete/edit message permission)\n"
@@ -74,8 +76,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/censor_list` - View all censored words\n\n"
         
         "*Anti-Spam Protection:*\n"
-        "Automatically deletes messages from users sending more than 6 messages in 10 seconds.\n"
-        "Commands: `/antispam_enable` and `/antispam_disable`\n\n"
+        "Automatically deletes messages from users sending more than 5 messages in 10 seconds.\n"
+        "Commands: `/antispam_enable`, `/antispam_disable`, `/antispam_limit`, `/antispam_penalty`\n\n"
         
         "*Admin Bypass:*\n"
         "When enabled, admins with delete/edit message permission can bypass sticker blocks and word filters.\n"

@@ -293,19 +293,21 @@ async def test_admin_can_set_spam_limit_and_mute(monkeypatch):
     bot.get_chat_member.return_value = member
 
     # Set limit
-    msg = DummyMessage(text='/antispam_set_limit 3', from_user=admin)
+    msg = DummyMessage(text='/antispam_limit 3', from_user=admin)
     update = DummyUpdate(msg)
     ctx = DummyContext(bot=bot, args=['3'])
 
+    # Command handler still calls the same function
     await moderation.antispam_set_limit(update, ctx)
     limit, minutes = database.Database.get_spam_settings(str(update.effective_chat.id))
     assert limit == 3
 
     # Set mute duration
-    msg2 = DummyMessage(text='/antispam_set_mute 2', from_user=admin)
+    msg2 = DummyMessage(text='/antispam_penalty 2', from_user=admin)
     update2 = DummyUpdate(msg2)
     ctx2 = DummyContext(bot=bot, args=['2'])
 
+    # Command handler still calls the same function
     await moderation.antispam_set_mute(update2, ctx2)
     limit2, minutes2 = database.Database.get_spam_settings(str(update2.effective_chat.id))
     assert minutes2 == 2

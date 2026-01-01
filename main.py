@@ -62,6 +62,9 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("antispam_disable", antispam_disable))
     app.add_handler(CommandHandler("antispam_set_limit", antispam_set_limit))
     app.add_handler(CommandHandler("antispam_set_mute", antispam_set_mute))
+    # Backward-compatible aliases (shorter command names)
+    app.add_handler(CommandHandler("antispam_limit", antispam_set_limit))
+    app.add_handler(CommandHandler("antispam_penalty", antispam_set_mute))
     app.add_handler(CommandHandler("debug_censor", debug_censor))
     
     # Admin commands
