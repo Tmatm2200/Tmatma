@@ -187,6 +187,14 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
     from utils.helpers import normalize_text
 
     raw_text = update.message.text or ""
+
+    # Remove leading bot commands (e.g., `/gemini@botname`) and strip @mentions
+    # as these are not part of the user-provided content for censor checks.
+    # This avoids false positives caused by usernames or command names inserting
+    # sequences of letters/digits that accidentally match censored tokens.
+    raw_text = re.sub(r'^\/\S+\s*', '', raw_text)
+    raw_text = re.sub(r'@\w+', '', raw_text)
+
     # Normalized versions of the message
     # compact version removes non-alnum and (by default) collapses repeated chars
     normalized_compact = normalize_text(raw_text, remove_non_alnum=True, collapse_repeats=True)
@@ -207,7 +215,12 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
         if is_strict:
             if word_norm and word_norm in normalized_compact:
                 try:
-                    logger.info(f"Censor matched '{word}' via strict match in chat {chat_id}")
+                    idx = normalized_compact.find(word_norm)
+                    logger.info(
+                        f"Censor matched '{word}' via strict match in chat {chat_id} "
+                        f"(pos={idx}-{idx + len(word_norm)}) user={update.effective_user.id} "
+                        f"msg={update.message.message_id}"
+                    )
                     await update.message.delete()
                     return True
                 except Exception as e:
@@ -225,9 +238,16 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 ch = m.group(1)
                 run_len = m.end() - m.start()
                 # Check for run in the message (compact, no collapse so repeats preserved)
-                if re.search(fr'{re.escape(ch)}' + r'{' + f'{run_len},' + r'}', normalized_compact_no_collapse):
+                pattern_run = re.compile(fr'{re.escape(ch)}' + r'{' + f'{run_len},' + r'}')
+                m2 = pattern_run.search(normalized_compact_no_collapse)
+                if m2:
                     try:
-                        logger.info(f"Censor matched '{word}' via repeated-run match in chat {chat_id}")
+                        s, e = m2.span()
+                        logger.info(
+                            f"Censor matched '{word}' via repeated-run match in chat {chat_id} "
+                            f"(char={ch} run_len={run_len} pos={s}-{e}) user={update.effective_user.id} "
+                            f"msg={update.message.message_id}"
+                        )
                         await update.message.delete()
                         return True
                     except Exception as e:
@@ -246,7 +266,12 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
         if word_norm.isdigit():
             if word_norm and word_norm in normalized_compact:
                 try:
-                    logger.info(f"Censor matched '{word}' via numeric substring in chat {chat_id}")
+                    idx = normalized_compact.find(word_norm)
+                    logger.info(
+                        f"Censor matched '{word}' via numeric substring in chat {chat_id} "
+                        f"(pos={idx}-{idx + len(word_norm)}) user={update.effective_user.id} "
+                        f"msg={update.message.message_id}"
+                    )
                     await update.message.delete()
                     return True
                 except Exception as e:
@@ -263,9 +288,16 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 parts = [re.escape(ch) for ch in word_norm]
                 sep_class = r"[^a-z0-9\u0600-\u06FF]*"
                 pattern = r"".join(p + sep_class for p in parts)
-                if re.search(pattern, normalized_preserve):
+                m2 = re.search(pattern, normalized_preserve)
+                if m2:
                     try:
-                        logger.info(f"Censor matched '{word}' via permissive regex in chat {chat_id}")
+                        s, e = m2.span()
+                        matched_snippet = normalized_preserve[s:e]
+                        logger.info(
+                            f"Censor matched '{word}' via permissive regex in chat {chat_id} "
+                            f"(pos={s}-{e} snippet='{matched_snippet}') user={update.effective_user.id} "
+                            f"msg={update.message.message_id}"
+                        )
                         await update.message.delete()
                         return True
                     except Exception as e:
@@ -273,31 +305,54 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 # Fallback: compact substring check
                 if word_norm in normalized_compact:
                     try:
-                        logger.info(f"Censor matched '{word}' via compact substring in chat {chat_id}")
+                        idx = normalized_compact.find(word_norm)
+                        logger.info(
+                            f"Censor matched '{word}' via compact substring in chat {chat_id} "
+                            f"(pos={idx}-{idx + len(word_norm)}) user={update.effective_user.id} "
+                            f"msg={update.message.message_id}"
+                        )
                         await update.message.delete()
                         return True
                     except Exception as e:
                         logger.debug(f"Failed to delete message after compact substring match: {e}")
 
                 # Additional fallback (restricted): subsequence match allowing at most one missing
-                # character — only applied to words of reasonable length to avoid false positives.
+                # character — only applied to reasonably long words and when matched chars are
+                # sufficiently concentrated (to avoid matching across unrelated long strings).
                 try:
-                    MIN_SUBSEQ_LEN = 3
+                    MIN_SUBSEQ_LEN = 4
                     if len(word_norm) >= MIN_SUBSEQ_LEN:
                         # Build a compacted searchable text (letters and digits and arabic letters only)
                         text_compacted = re.sub(r'[^a-z0-9\u0600-\u06FF]+', '', normalized_preserve)
-                        # Count matched characters of word_norm as ordered subsequence
+                        # Track matched count *and* positions to ensure matches are close together
                         matched = 0
                         pos = 0
+                        first_idx = None
+                        last_idx = None
                         for ch in word_norm:
                             idx = text_compacted.find(ch, pos)
                             if idx != -1:
                                 matched += 1
+                                if first_idx is None:
+                                    first_idx = idx
+                                last_idx = idx
                                 pos = idx + 1
-                        # Allow at most one missing character
-                        if matched >= max(1, len(word_norm) - 1):
+                        if first_idx is not None and last_idx is not None:
+                            span = last_idx - first_idx + 1
+                        else:
+                            span = None
+
+                        # Require at least len(word)-1 characters matched AND a reasonable density
+                        # (matched proportion >= 0.75) and that the matched characters are not spread
+                        # over an extremely long span (allow up to 3x the token length).
+                        proportion = matched / len(word_norm) if len(word_norm) > 0 else 0
+                        if matched >= max(1, len(word_norm) - 1) and proportion >= 0.75 and (span is not None and span <= max(3 * len(word_norm), len(word_norm) + 2)):
                             try:
-                                logger.info(f"Censor matched '{word}' via subsequence fallback in chat {chat_id}")
+                                logger.info(
+                                    f"Censor matched '{word}' via subsequence fallback in chat {chat_id} "
+                                    f"(matched {matched}/{len(word_norm)}, span={span}, first={first_idx}, last={last_idx}) "
+                                    f"user={update.effective_user.id} msg={update.message.message_id}"
+                                )
                                 await update.message.delete()
                                 return True
                             except Exception as e:
