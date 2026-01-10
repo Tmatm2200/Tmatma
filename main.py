@@ -26,7 +26,7 @@ from handlers.moderation import (
     clear_messages, clear_except,
     antispam_enable, antispam_disable, antispam_limit, antispam_penalty,
     label_bad, label_normal, list_collected,
-    ai_moderation_on, ai_moderation_off, debug_badness
+    ai_moderation_on, ai_moderation_off, debug_badness, packids, get_sticker_id
 )
 from handlers.admin import admins_enable, admins_disable
 from handlers.messages import handle_messages, track_messages
@@ -70,6 +70,8 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("br_on", ai_moderation_on))
     app.add_handler(CommandHandler("br_off", ai_moderation_off))
     app.add_handler(CommandHandler("bd", debug_badness))
+    app.add_handler(CommandHandler("packids", packids))
+    app.add_handler(CommandHandler("id", get_sticker_id))
 
     # Admin commands
     app.add_handler(CommandHandler("admins_enable", admins_enable))
@@ -88,7 +90,8 @@ def main() -> None:
     
     # Initialize database
     try:
-        Database.init_tables()
+        import asyncio
+        asyncio.run(Database.init_tables())
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         return

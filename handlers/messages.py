@@ -9,6 +9,7 @@ import datetime
 from collections import defaultdict
 from telegram import Update, ReactionTypeEmoji
 from telegram.ext import ContextTypes
+import asyncio
 from config import ADMIN_ID, SPAM_MESSAGE_LIMIT, SPAM_TIME_WINDOW, ENABLE_ARABIC_RESPONSES
 from utils.database import Database
 from utils.ai_moderator import ai_moderator
@@ -23,50 +24,69 @@ SPAM_TRACKER = defaultdict(list)
 
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Main message handler - checks for spam, blocked stickers, censored words."""
+    handler_start = time.time()
     if not update.message:
         return
-    
+
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     message = update.message
     
     # --- 1. ANTI-SPAM CHECK ---
-    if Database.is_antispam_enabled(chat_id) and user_id != ADMIN_ID:
+    check_start = time.time()
+    if await Database.is_antispam_enabled(chat_id) and user_id != ADMIN_ID:
         if await check_spam(update, context):
+            logger.info(f"Message processing (spam blocked): {time.time() - handler_start:.3f}s")
             return  # Message was spam and deleted
-    
+    logger.info(f"Anti-spam check: {time.time() - check_start:.3f}s")
+
     # --- 2. CHECK PERMISSIONS ---
+    check_start = time.time()
     status = await get_user_status(update, context)
-    is_admin_bypass = Database.is_admin_bypass_enabled(chat_id)
+    is_admin_bypass = await Database.is_admin_bypass_enabled(chat_id)
     user_can_bypass = user_id == ADMIN_ID
 
     # If admin bypass is enabled, allow admins with delete messages permission
-    if is_admin_bypass and status in ("administrator", "creator"):
+    if is_admin_bypass and status == "administrator":
         try:
             member = await context.bot.get_chat_member(chat_id, user_id)
             if member.can_delete_messages:
                 user_can_bypass = True
         except Exception as e:
             logger.error(f"Failed to check admin permissions: {e}")
-    
+    logger.info(f"Permissions check: {time.time() - check_start:.3f}s")
+
     # --- 3. STICKER BLOCKING ---
+    check_start = time.time()
     if message.sticker and not user_can_bypass:
         if await check_blocked_sticker(update, context, chat_id):
+            logger.info(f"Message processing (sticker blocked): {time.time() - handler_start:.3f}s")
             return  # Sticker was blocked and deleted
-    
+    logger.info(f"Sticker check: {time.time() - check_start:.3f}s")
+
     # --- 4. WORD CENSORING (FIXED!) ---
+    check_start = time.time()
     if message.text and not user_can_bypass:
         if await check_censored_words(update, context, chat_id):
+            logger.info(f"Message processing (word censored): {time.time() - handler_start:.3f}s")
             return  # Message contained censored word and was deleted
+    logger.info(f"Word censoring: {time.time() - check_start:.3f}s")
 
     # --- 5. AI MODERATION ---
+    check_start = time.time()
     if message.text and not user_can_bypass:
         if await check_ai_moderation(update, context, chat_id):
+            logger.info(f"Message processing (AI flagged): {time.time() - handler_start:.3f}s")
             return  # Message was flagged as bad and deleted
+    logger.info(f"AI moderation: {time.time() - check_start:.3f}s")
 
     # --- 6. CUSTOM RESPONSES (FIXED REACTIONS!) ---
+    check_start = time.time()
     if ENABLE_ARABIC_RESPONSES and message.text:
         await handle_custom_responses(update, context)
+    logger.info(f"Custom responses: {time.time() - check_start:.3f}s")
+
+    logger.info(f"Total message processing: {time.time() - handler_start:.3f}s")
 
 
 async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -82,8 +102,8 @@ async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
     now = time.time()
 
     # Get settings from database
-    spam_limit = Database.get_spam_limit(chat_id)
-    mute_penalty = Database.get_mute_penalty(chat_id)
+    spam_limit = await Database.get_spam_limit(chat_id)
+    mute_penalty = await Database.get_mute_penalty(chat_id)
 
     # Clean old messages outside time window
     SPAM_TRACKER[key] = [
@@ -133,7 +153,7 @@ async def check_blocked_sticker(update: Update, context: ContextTypes.DEFAULT_TY
     
     set_name = sticker.set_name.lower()
     
-    if Database.is_set_blocked(chat_id, set_name):
+    if await Database.is_set_blocked(chat_id, set_name):
         try:
             await update.message.delete()
             return True
@@ -182,7 +202,7 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
     # Normalize Arabic text for better matching
     text_normalized = normalize_arabic_text(text_lower)
     
-    censored_words = Database.get_censored_words(chat_id)
+    censored_words = await Database.get_censored_words(chat_id)
     
     if not censored_words:
         return False
@@ -234,13 +254,13 @@ async def check_ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE
     Check if message is flagged as bad by AI and delete if needed.
     Returns True if message was deleted.
     """
-    if not Database.is_ai_moderation_enabled(chat_id):
+    if not await Database.is_ai_moderation_enabled(chat_id):
         return False
 
     text = update.message.text
-    threshold = Database.get_ai_threshold(chat_id)
+    threshold = await Database.get_ai_threshold(chat_id)
 
-    if ai_moderator.is_bad(text, threshold):
+    if await ai_moderator.is_bad_async(text, threshold):
         logger.info(f"AI flagged bad: '{text}' (threshold {threshold}%)")
         try:
             await update.message.delete()
@@ -275,8 +295,8 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
                 return
 
     # --- PUBLIC REACTIONS (ANYONE CAN TRIGGER) ---
-    # React with heart to "كيوت", "شاطرة" or "شاطرة يالبوتة" from ANYONE
-    if text.strip() in ("كيوت", "شاطرة", "شاطرة يالبوتة"):
+    # React with heart to messages containing "كيوت", "شاطرة" or "شاطرة يالبوتة" from ANYONE
+    if any(word in text for word in ("كيوت", "شاطرة", "شاطرة يالبوتة")):
         try:
             await update.message.set_reaction([ReactionTypeEmoji("❤")])
             return
@@ -301,8 +321,8 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
     # Randomized responses
     random_responses = {
         ("يالبوت بتحبي يالبوت", "بتحبي يالبوت يالبوتة"): ["يع", "لا"],
+        ("شتاينز",): ["شتاينز الأعظم", "عمك"],
         ("يالبوتة",): ["ايه", "لا", "نعم", "اتكل علي الله", "يع", "غور", "خش نام", "بس يا جلنف", "أقل جلنف", "فاك يو", "ما أنت جلنف", "رد عليه أنت يالبوت"],
-        ("شتاينز",): ["شتاينز الأعظم", "عمك"]
     }
     
     for triggers, responses in random_responses.items():

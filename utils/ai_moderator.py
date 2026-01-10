@@ -5,6 +5,7 @@ Supports Arabic text.
 import json
 import os
 import logging
+import asyncio
 from typing import List, Dict, Tuple
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import SVC
@@ -22,6 +23,8 @@ class AIModerator:
         self.pipeline = None
         self.load_data()
         self.load_model()
+        # Always retrain on startup to ensure model is up-to-date
+        self.train_model()
 
     def load_data(self) -> None:
         """Load training data from JSON file."""
@@ -104,6 +107,8 @@ class AIModerator:
 
     def predict_badness(self, text: str) -> float:
         """Predict the badness percentage of a text."""
+        import time
+        predict_start = time.time()
         if not self.pipeline:
             return 0.0
 
@@ -112,6 +117,8 @@ class AIModerator:
             # decision_function gives signed distance, convert to probability-like
             # For LinearSVC, probability=True enables predict_proba
             proba = self.pipeline.predict_proba([text])[0][1]  # Probability of class 1 (bad)
+            predict_time = time.time() - predict_start
+            logger.debug(f"AI prediction took {predict_time:.3f}s for text: {text[:20]}...")
             return proba * 100
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -120,6 +127,10 @@ class AIModerator:
     def is_bad(self, text: str, threshold: float = 75.0) -> bool:
         """Check if text is bad based on threshold."""
         return self.predict_badness(text) > threshold
+
+    async def is_bad_async(self, text: str, threshold: float = 75.0) -> bool:
+        """Async version of is_bad using thread pool."""
+        return await asyncio.to_thread(self.is_bad, text, threshold)
 
 # Global instance
 ai_moderator = AIModerator()

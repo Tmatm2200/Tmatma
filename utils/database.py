@@ -2,36 +2,36 @@
 Database operations for the bot.
 Centralized database access with proper error handling.
 """
-import sqlite3
+import aiosqlite
 import logging
 from typing import Optional, List, Tuple, Any
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
 
-@contextmanager
-def get_db_connection():
-    """Context manager for database connections with proper cleanup."""
+@asynccontextmanager
+async def get_db_connection():
+    """Async context manager for database connections with proper cleanup."""
     conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=30)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn = await aiosqlite.connect(DB_PATH, timeout=30)
+        await conn.execute("PRAGMA journal_mode=WAL;")
+        await conn.execute("PRAGMA synchronous=NORMAL;")
         yield conn
-        conn.commit()
+        await conn.commit()
     except Exception as e:
         if conn:
-            conn.rollback()
+            await conn.rollback()
         logger.error(f"Database error: {e}")
         raise
     finally:
         if conn:
-            conn.close()
+            await conn.close()
 
 
-def execute_query(
+async def execute_query(
     query: str,
     params: Tuple = (),
     fetch_one: bool = False,
@@ -39,27 +39,31 @@ def execute_query(
 ) -> Optional[Any]:
     """
     Execute a database query with parameters.
-    
+
     Args:
         query: SQL query string
         params: Query parameters
         fetch_one: Return single row
         fetch_all: Return all rows
-        
+
     Returns:
         Query result or None on error
     """
+    import time
+    query_start = time.time()
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            
+        async with get_db_connection() as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(query, params)
+
             if fetch_one:
-                return cursor.fetchone()
+                result = await cursor.fetchone()
             elif fetch_all:
-                return cursor.fetchall()
+                result = await cursor.fetchall()
             else:
-                return cursor.rowcount
+                result = cursor.rowcount
+        logger.debug(f"DB query took {time.time() - query_start:.3f}s: {query[:50]}...")
+        return result
     except Exception as e:
         logger.error(f"Query execution failed: {e}")
         return None
@@ -69,7 +73,7 @@ class Database:
     """Database interface for bot operations."""
     
     @staticmethod
-    def init_tables() -> None:
+    async def init_tables() -> None:
         """Initialize all database tables."""
         queries = [
             """CREATE TABLE IF NOT EXISTS blocked_sets (
@@ -96,16 +100,16 @@ class Database:
         ]
         
         for query in queries:
-            execute_query(query)
+            await execute_query(query)
 
         # Migration for new columns
         migration_queries = [
             "ALTER TABLE chat_settings ADD COLUMN ai_enabled INTEGER DEFAULT 0",
-            "ALTER TABLE chat_settings ADD COLUMN ai_threshold REAL DEFAULT 75.0"
+            "ALTER TABLE chat_settings ADD COLUMN ai_threshold REAL DEFAULT 60.0"
         ]
         for query in migration_queries:
             try:
-                execute_query(query)
+                await execute_query(query)
             except Exception as e:
                 logger.debug(f"Migration query failed (column may exist): {e}")
 
@@ -141,9 +145,9 @@ class Database:
         return [row[0] for row in result] if result else []
     
     @staticmethod
-    def is_set_blocked(chat_id: str, set_name: str) -> bool:
+    async def is_set_blocked(chat_id: str, set_name: str) -> bool:
         """Check if a sticker set is blocked."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT 1 FROM blocked_sets WHERE chat_id = ? AND set_name = ? LIMIT 1",
             (chat_id, set_name),
             fetch_one=True
@@ -179,9 +183,9 @@ class Database:
         return result is not None and result > 0
     
     @staticmethod
-    def get_censored_words(chat_id: str) -> List[Tuple[str, bool]]:
+    async def get_censored_words(chat_id: str) -> List[Tuple[str, bool]]:
         """Get all censored words for a chat."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT word, is_strict FROM censored_words WHERE chat_id = ?",
             (chat_id,),
             fetch_all=True
@@ -208,9 +212,9 @@ class Database:
         return result is not None
     
     @staticmethod
-    def is_admin_bypass_enabled(chat_id: str) -> bool:
+    async def is_admin_bypass_enabled(chat_id: str) -> bool:
         """Check if admin bypass is enabled."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT admins_allowed FROM admin_perms WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True
@@ -227,9 +231,9 @@ class Database:
         return result is not None
     
     @staticmethod
-    def is_antispam_enabled(chat_id: str) -> bool:
+    async def is_antispam_enabled(chat_id: str) -> bool:
         """Check if antispam is enabled."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT antispam_enabled FROM chat_settings WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True
@@ -237,9 +241,9 @@ class Database:
         return result[0] == 1 if result else False
 
     @staticmethod
-    def get_spam_limit(chat_id: str) -> int:
+    async def get_spam_limit(chat_id: str) -> int:
         """Get spam limit for a chat."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT spam_limit FROM chat_settings WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True
@@ -256,9 +260,9 @@ class Database:
         return result is not None
 
     @staticmethod
-    def get_mute_penalty(chat_id: str) -> int:
+    async def get_mute_penalty(chat_id: str) -> int:
         """Get mute penalty minutes for a chat."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT mute_penalty FROM chat_settings WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True
@@ -284,9 +288,9 @@ class Database:
         return result is not None
 
     @staticmethod
-    def is_ai_moderation_enabled(chat_id: str) -> bool:
+    async def is_ai_moderation_enabled(chat_id: str) -> bool:
         """Check if AI moderation is enabled."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT ai_enabled FROM chat_settings WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True
@@ -294,9 +298,9 @@ class Database:
         return result[0] == 1 if result else False
 
     @staticmethod
-    def get_ai_threshold(chat_id: str) -> float:
+    async def get_ai_threshold(chat_id: str) -> float:
         """Get AI threshold for bad detection."""
-        result = execute_query(
+        result = await execute_query(
             "SELECT ai_threshold FROM chat_settings WHERE chat_id = ?",
             (chat_id,),
             fetch_one=True

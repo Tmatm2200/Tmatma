@@ -2,6 +2,7 @@
 Moderation command handlers (block, clear, censor).
 """
 import asyncio
+import io
 import re
 from collections import deque
 from telegram import Update
@@ -363,6 +364,51 @@ async def debug_badness(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args).strip()
     badness = ai_moderator.predict_badness(text)
     await update.message.reply_text(f"🤖 Badness of `{text}`: {badness:.1f}%", parse_mode='Markdown')
+
+
+@admin_or_owner
+@handle_errors
+async def packids(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /packids command - get all file IDs of stickers in a set."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/packids <sticker_set_link_or_name>`", parse_mode='Markdown')
+        return
+
+    raw = " ".join(context.args).strip()
+
+    # Extract set name from link if provided
+    if "addstickers/" in raw:
+        set_name = raw.split("addstickers/")[-1].split("?")[0].strip()
+    else:
+        set_name = raw
+
+    try:
+        sticker_set = await context.bot.get_sticker_set(set_name)
+        file_ids = [sticker.file_id for sticker in sticker_set.stickers]
+        file_ids_text = "\n".join(file_ids)
+        file_data = io.BytesIO(file_ids_text.encode('utf-8'))
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=file_data,
+            filename=f"{set_name}_file_ids.txt",
+            caption=f"📦 File IDs for `{set_name}` ({len(file_ids)} stickers)",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+
+
+@admin_or_owner
+@handle_errors
+async def get_sticker_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /id command - get file ID of replied sticker."""
+    if not update.message.reply_to_message or not update.message.reply_to_message.sticker:
+        await update.message.reply_text("❌ Reply to a sticker message with `/id`", parse_mode='Markdown')
+        return
+
+    sticker = update.message.reply_to_message.sticker
+    file_id = sticker.file_id
+    await update.message.reply_text(f"🆔 File ID: `{file_id}`", parse_mode='Markdown')
 
 
 def track_message(chat_id: int, message_id: int, user_id: int, username: str):
