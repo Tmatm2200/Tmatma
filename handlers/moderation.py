@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import MAX_CLEAR_COUNT, MAX_MESSAGE_HISTORY
 from utils.database import Database
+from utils.ai_moderator import ai_moderator
 from utils.decorators import admin_or_owner, handle_errors
 
 # Global message history for clearing
@@ -279,6 +280,89 @@ async def antispam_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     Database.set_mute_penalty(chat_id, penalty)
     await update.message.reply_text(f"✅ Anti-Spam mute penalty set to {penalty} minutes.")
+
+
+@admin_or_owner
+@handle_errors
+async def label_bad(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /lb command - label word/phrase as bad."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/lb <word or phrase>`", parse_mode='Markdown')
+        return
+
+    text = " ".join(context.args).strip()
+    ai_moderator.add_label(text, is_bad=True)
+    await update.message.reply_text(f"✅ Labeled as bad: `{text}`", parse_mode='Markdown')
+
+
+@admin_or_owner
+@handle_errors
+async def label_normal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ln command - label word/phrase as normal."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/ln <word or phrase>`", parse_mode='Markdown')
+        return
+
+    text = " ".join(context.args).strip()
+    ai_moderator.add_label(text, is_bad=False)
+    await update.message.reply_text(f"✅ Labeled as normal: `{text}`", parse_mode='Markdown')
+
+
+@admin_or_owner
+@handle_errors
+async def list_collected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /lc command - list collected words."""
+    data = ai_moderator.get_all_labeled()
+    bad_count = len(data['bad'])
+    good_count = len(data['good'])
+
+    if bad_count == 0 and good_count == 0:
+        await update.message.reply_text("📋 No words collected yet.")
+        return
+
+    response = f"🤖 *AI Training Data:*\n\n"
+    if bad_count > 0:
+        bad_list = "\n".join([f"• `{w}`" for w in data['bad'][:20]])  # Limit to 20
+        response += f"🚫 *Bad ({bad_count}):*\n{bad_list}\n\n"
+    if good_count > 0:
+        good_list = "\n".join([f"• `{w}`" for w in data['good'][:20]])
+        response += f"✅ *Good ({good_count}):*\n{good_list}"
+
+    if bad_count > 20 or good_count > 20:
+        response += "\n\n*(Showing first 20 of each)*"
+
+    await update.message.reply_text(response, parse_mode='Markdown')
+
+
+@admin_or_owner
+@handle_errors
+async def ai_moderation_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /br_on command - enable AI moderation."""
+    chat_id = str(update.effective_chat.id)
+    Database.set_ai_moderation(chat_id, True)
+    await update.message.reply_text("🤖 AI moderation enabled.")
+
+
+@admin_or_owner
+@handle_errors
+async def ai_moderation_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /br_off command - disable AI moderation."""
+    chat_id = str(update.effective_chat.id)
+    Database.set_ai_moderation(chat_id, False)
+    await update.message.reply_text("😴 AI moderation disabled.")
+
+
+@admin_or_owner
+@handle_errors
+async def debug_badness(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bd command - debug badness of word/phrase."""
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/bd <word or phrase>`", parse_mode='Markdown')
+        return
+
+    text = " ".join(context.args).strip()
+    badness = ai_moderator.predict_badness(text)
+    await update.message.reply_text(f"🤖 Badness of `{text}`: {badness:.1f}%", parse_mode='Markdown')
 
 
 def track_message(chat_id: int, message_id: int, user_id: int, username: str):

@@ -11,6 +11,7 @@ from telegram import Update, ReactionTypeEmoji
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, SPAM_MESSAGE_LIMIT, SPAM_TIME_WINDOW, ENABLE_ARABIC_RESPONSES
 from utils.database import Database
+from utils.ai_moderator import ai_moderator
 from utils.decorators import get_user_status
 import logging
 
@@ -57,8 +58,13 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.text and not user_can_bypass:
         if await check_censored_words(update, context, chat_id):
             return  # Message contained censored word and was deleted
-    
-    # --- 5. CUSTOM RESPONSES (FIXED REACTIONS!) ---
+
+    # --- 5. AI MODERATION ---
+    if message.text and not user_can_bypass:
+        if await check_ai_moderation(update, context, chat_id):
+            return  # Message was flagged as bad and deleted
+
+    # --- 6. CUSTOM RESPONSES (FIXED REACTIONS!) ---
     if ENABLE_ARABIC_RESPONSES and message.text:
         await handle_custom_responses(update, context)
 
@@ -220,6 +226,28 @@ async def check_censored_words(update: Update, context: ContextTypes.DEFAULT_TYP
                 except Exception as e:
                     logger.error(f"Failed to delete message: {e}")
     
+    return False
+
+
+async def check_ai_moderation(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: str) -> bool:
+    """
+    Check if message is flagged as bad by AI and delete if needed.
+    Returns True if message was deleted.
+    """
+    if not Database.is_ai_moderation_enabled(chat_id):
+        return False
+
+    text = update.message.text
+    threshold = Database.get_ai_threshold(chat_id)
+
+    if ai_moderator.is_bad(text, threshold):
+        logger.info(f"AI flagged bad: '{text}' (threshold {threshold}%)")
+        try:
+            await update.message.delete()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete AI-flagged message: {e}")
+
     return False
 
 

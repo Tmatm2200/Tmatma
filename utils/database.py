@@ -97,7 +97,18 @@ class Database:
         
         for query in queries:
             execute_query(query)
-        
+
+        # Migration for new columns
+        migration_queries = [
+            "ALTER TABLE chat_settings ADD COLUMN ai_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE chat_settings ADD COLUMN ai_threshold REAL DEFAULT 75.0"
+        ]
+        for query in migration_queries:
+            try:
+                execute_query(query)
+            except Exception as e:
+                logger.debug(f"Migration query failed (column may exist): {e}")
+
         logger.info("Database initialized successfully")
     
     # --- Blocked Stickers ---
@@ -260,5 +271,43 @@ class Database:
         result = execute_query(
             "INSERT OR REPLACE INTO chat_settings (chat_id, mute_penalty) VALUES (?, ?)",
             (chat_id, penalty)
+        )
+        return result is not None
+
+    @staticmethod
+    def set_ai_moderation(chat_id: str, enabled: bool) -> bool:
+        """Set AI moderation enabled/disabled."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO chat_settings (chat_id, ai_enabled) VALUES (?, ?)",
+            (chat_id, 1 if enabled else 0)
+        )
+        return result is not None
+
+    @staticmethod
+    def is_ai_moderation_enabled(chat_id: str) -> bool:
+        """Check if AI moderation is enabled."""
+        result = execute_query(
+            "SELECT ai_enabled FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        return result[0] == 1 if result else False
+
+    @staticmethod
+    def get_ai_threshold(chat_id: str) -> float:
+        """Get AI threshold for bad detection."""
+        result = execute_query(
+            "SELECT ai_threshold FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        return result[0] if result else 75.0
+
+    @staticmethod
+    def set_ai_threshold(chat_id: str, threshold: float) -> bool:
+        """Set AI threshold."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO chat_settings (chat_id, ai_threshold) VALUES (?, ?)",
+            (chat_id, threshold)
         )
         return result is not None

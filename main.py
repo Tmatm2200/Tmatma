@@ -24,7 +24,9 @@ from handlers.moderation import (
     block_sticker, unblock_sticker, list_blocked_sets,
     censor_word, list_censored_words,
     clear_messages, clear_except,
-    antispam_enable, antispam_disable, antispam_limit, antispam_penalty
+    antispam_enable, antispam_disable, antispam_limit, antispam_penalty,
+    label_bad, label_normal, list_collected,
+    ai_moderation_on, ai_moderation_off, debug_badness
 )
 from handlers.admin import admins_enable, admins_disable
 from handlers.messages import handle_messages, track_messages
@@ -60,7 +62,15 @@ def register_handlers(app: Application) -> None:
     app.add_handler(CommandHandler("antispam_disable", antispam_disable))
     app.add_handler(CommandHandler("antispam_limit", antispam_limit))
     app.add_handler(CommandHandler("antispam_penalty", antispam_penalty))
-    
+
+    # AI moderation commands
+    app.add_handler(CommandHandler("lb", label_bad))
+    app.add_handler(CommandHandler("ln", label_normal))
+    app.add_handler(CommandHandler("lc", list_collected))
+    app.add_handler(CommandHandler("br_on", ai_moderation_on))
+    app.add_handler(CommandHandler("br_off", ai_moderation_off))
+    app.add_handler(CommandHandler("bd", debug_badness))
+
     # Admin commands
     app.add_handler(CommandHandler("admins_enable", admins_enable))
     app.add_handler(CommandHandler("admins_disable", admins_disable))
