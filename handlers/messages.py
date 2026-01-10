@@ -5,6 +5,7 @@ ALL CENSORING AND REACTION ISSUES FIXED!
 import re
 import time
 import random
+import datetime
 from collections import defaultdict
 from telegram import Update, ReactionTypeEmoji
 from telegram.ext import ContextTypes
@@ -36,10 +37,16 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- 2. CHECK PERMISSIONS ---
     status = await get_user_status(update, context)
     is_admin_bypass = Database.is_admin_bypass_enabled(chat_id)
-    user_can_bypass = (
-        user_id == ADMIN_ID or 
-        (is_admin_bypass and status in ("administrator", "creator"))
-    )
+    user_can_bypass = user_id == ADMIN_ID
+
+    # If admin bypass is enabled, allow admins with delete messages permission
+    if is_admin_bypass and status in ("administrator", "creator"):
+        try:
+            member = await context.bot.get_chat_member(chat_id, user_id)
+            if member.can_delete_messages:
+                user_can_bypass = True
+        except Exception as e:
+            logger.error(f"Failed to check admin permissions: {e}")
     
     # --- 3. STICKER BLOCKING ---
     if message.sticker and not user_can_bypass:
@@ -58,38 +65,54 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_spam(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
-    Check if message is spam and delete if necessary.
+    Check if message is spam and mute/delete if necessary.
     Returns True if message was deleted as spam.
     """
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     message_id = update.message.message_id
-    
+
     key = (chat_id, user_id)
     now = time.time()
-    
+
+    # Get settings from database
+    spam_limit = Database.get_spam_limit(chat_id)
+    mute_penalty = Database.get_mute_penalty(chat_id)
+
     # Clean old messages outside time window
     SPAM_TRACKER[key] = [
         (mid, ts) for mid, ts in SPAM_TRACKER[key]
         if now - ts < SPAM_TIME_WINDOW
     ]
-    
+
     # Add current message
     SPAM_TRACKER[key].append((message_id, now))
-    
+
     # Check if spam limit exceeded
-    if len(SPAM_TRACKER[key]) > SPAM_MESSAGE_LIMIT:
-        # Delete all messages except the first one
-        for mid, _ in SPAM_TRACKER[key][1:]:
+    if len(SPAM_TRACKER[key]) > spam_limit:
+        # Mute the user
+        try:
+            until_date = datetime.datetime.now() + datetime.timedelta(minutes=mute_penalty)
+            await context.bot.restrict_chat_member(
+                chat_id,
+                user_id,
+                permissions=None,  # Fully restrict (mute)
+                until_date=until_date
+            )
+        except Exception as e:
+            logger.error(f"Failed to mute user {user_id}: {e}")
+
+        # Delete all messages from this spam burst
+        for mid, _ in SPAM_TRACKER[key]:
             try:
                 await context.bot.delete_message(chat_id, mid)
             except:
                 pass
-        
-        # Keep only first message in tracker
-        SPAM_TRACKER[key] = [SPAM_TRACKER[key][0]]
+
+        # Clear tracker for this user
+        SPAM_TRACKER[key] = []
         return True
-    
+
     return False
 
 
@@ -208,26 +231,8 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
     text = update.message.text.lower()
     user_id = update.effective_user.id
     
-    # --- OWNER-ONLY REACTIONS (FIXED!) ---
+    # --- OWNER-ONLY RESPONSES ---
     if user_id == ADMIN_ID:
-        # React with heart to "كيوت" (NO REPLY, JUST REACTION)
-        if text.strip() == "كيوت":
-            try:
-                await update.message.set_reaction([ReactionTypeEmoji("❤")])
-                return  # Don't process further
-            except Exception as e:
-                logger.error(f"Failed to set reaction: {e}")
-            return
-        
-        # React with heart to "شاطرة" or "شاطرة يالبوتة" (NO REPLY, JUST REACTION)
-        if text.strip() in ("شاطرة", "شاطرة يالبوتة"):
-            try:
-                await update.message.set_reaction([ReactionTypeEmoji("❤")])
-                return  # Don't process further
-            except Exception as e:
-                logger.error(f"Failed to set reaction: {e}")
-            return
-        
         # Owner-only text responses (these DO reply)
         owner_responses = {
             "بنتي": "نعم",
@@ -235,15 +240,15 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
             "مين حبيبة بابا": "أنا",
             "مين أشطر كتكوتة": "أنا",
         }
-        
+
         for trigger, response in owner_responses.items():
             if trigger in text:
                 await update.message.reply_text(response)
                 return
-    
+
     # --- PUBLIC REACTIONS (ANYONE CAN TRIGGER) ---
-    # React with heart to "شاطرة" or "شاطرة يالبوتة" from ANYONE
-    if text.strip() in ("شاطرة", "شاطرة يالبوتة"):
+    # React with heart to "كيوت", "شاطرة" or "شاطرة يالبوتة" from ANYONE
+    if text.strip() in ("كيوت", "شاطرة", "شاطرة يالبوتة"):
         try:
             await update.message.set_reaction([ReactionTypeEmoji("❤")])
             return
@@ -253,22 +258,22 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
     
     # --- PUBLIC TEXT RESPONSES ---
     # Mention specific user
-    if "يا جلن" in text:
+    if "يا جلنف" in text:
         target_id = 1979054413
         await update.message.reply_text(
-            f"يا [الجلن](tg://user?id={target_id})",
+            f"يا [الجلنف](tg://user?id={target_id})",
             parse_mode='Markdown'
         )
         return
     
-    if "مين الجلن" in text or "جلن" in text:
+    if "مين الجلنف" in text or "جلنف" in text:
         await update.message.reply_text("رفصو")
         return
     
     # Randomized responses
     random_responses = {
         ("يالبوت بتحبي يالبوت", "بتحبي يالبوت يالبوتة"): ["يع", "لا"],
-        ("يالبوتة",): ["ايه", "لا", "نعم", "اتكل علي الله", "يع", "غور", "خش نام", "بس يا جلن", "أقل جلن"],
+        ("يالبوتة",): ["ايه", "لا", "نعم", "اتكل علي الله", "يع", "غور", "خش نام", "بس يا جلنف", "أقل جلنف", "فاك يو", "ما أنت جلنف", "رد عليه أنت يالبوت"],
         ("شتاينز",): ["شتاينز الأعظم", "عمك"]
     }
     

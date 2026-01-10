@@ -5,6 +5,10 @@ Load environment variables and set up constants.
 import os
 from pathlib import Path
 from typing import Final
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Base directory
 BASE_DIR: Path = Path(__file__).parent.absolute()

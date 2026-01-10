@@ -89,7 +89,9 @@ class Database:
             )""",
             """CREATE TABLE IF NOT EXISTS chat_settings (
                 chat_id TEXT PRIMARY KEY,
-                antispam_enabled INTEGER DEFAULT 0
+                antispam_enabled INTEGER DEFAULT 0,
+                spam_limit INTEGER DEFAULT 6,
+                mute_penalty INTEGER DEFAULT 15
             )"""
         ]
         
@@ -222,3 +224,41 @@ class Database:
             fetch_one=True
         )
         return result[0] == 1 if result else False
+
+    @staticmethod
+    def get_spam_limit(chat_id: str) -> int:
+        """Get spam limit for a chat."""
+        result = execute_query(
+            "SELECT spam_limit FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        return result[0] if result else 6
+
+    @staticmethod
+    def set_spam_limit(chat_id: str, limit: int) -> bool:
+        """Set spam limit for a chat."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO chat_settings (chat_id, spam_limit) VALUES (?, ?)",
+            (chat_id, limit)
+        )
+        return result is not None
+
+    @staticmethod
+    def get_mute_penalty(chat_id: str) -> int:
+        """Get mute penalty minutes for a chat."""
+        result = execute_query(
+            "SELECT mute_penalty FROM chat_settings WHERE chat_id = ?",
+            (chat_id,),
+            fetch_one=True
+        )
+        return result[0] if result else 15
+
+    @staticmethod
+    def set_mute_penalty(chat_id: str, penalty: int) -> bool:
+        """Set mute penalty minutes for a chat."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO chat_settings (chat_id, mute_penalty) VALUES (?, ?)",
+            (chat_id, penalty)
+        )
+        return result is not None

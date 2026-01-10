@@ -245,6 +245,42 @@ async def antispam_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("😴 Anti-Spam disabled.")
 
 
+@admin_or_owner
+@handle_errors
+async def antispam_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /antispam_limit command - set spam limit per 10 seconds."""
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Usage: `/antispam_limit <number>`", parse_mode='Markdown')
+        return
+
+    limit = int(context.args[0])
+    if limit < 1 or limit > 50:
+        await update.message.reply_text("❌ Limit must be between 1 and 50.")
+        return
+
+    chat_id = str(update.effective_chat.id)
+    Database.set_spam_limit(chat_id, limit)
+    await update.message.reply_text(f"✅ Anti-Spam limit set to {limit} messages per 10 seconds.")
+
+
+@admin_or_owner
+@handle_errors
+async def antispam_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /antispam_penalty command - set mute penalty in minutes."""
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Usage: `/antispam_penalty <minutes>`", parse_mode='Markdown')
+        return
+
+    penalty = int(context.args[0])
+    if penalty < 1 or penalty > 1440:
+        await update.message.reply_text("❌ Penalty must be between 1 and 1440 minutes (24 hours).")
+        return
+
+    chat_id = str(update.effective_chat.id)
+    Database.set_mute_penalty(chat_id, penalty)
+    await update.message.reply_text(f"✅ Anti-Spam mute penalty set to {penalty} minutes.")
+
+
 def track_message(chat_id: int, message_id: int, user_id: int, username: str):
     """Add message to history for clear commands."""
     MESSAGE_HISTORY.append((chat_id, message_id, user_id, username))
