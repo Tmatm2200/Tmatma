@@ -52,11 +52,11 @@ async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # If we still don't have a user, try to resolve from args[0] if it looks like a username
         if not target_user and args[0].startswith("@"):
             try:
-                # This is not reliable in API without caching, but let's try chat_member
-                # Actually, getting user by username is hard for bots if they haven't interacted.
-                # Best practice: Ask to reply or use ID if possible, or rely on the entity if parsed.
-                # If the user typed @username, Telegram client usually creates a mention entity.
-                pass
+                username = args[0]
+                user_id = await Database.get_user_id_by_username(username)
+                if user_id:
+                    member = await context.bot.get_chat_member(chat_id, int(user_id))
+                    target_user = member.user
             except Exception:
                 pass
                 
@@ -116,7 +116,7 @@ async def promote_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Record in database
-        Database.add_bot_promoted_admin(chat_id, str(target_user.id), custom_title)
+        await Database.add_bot_promoted_admin(chat_id, str(target_user.id), custom_title)
         
         await message.reply_text(f"✅ Promoted {target_user.mention_html()} to admin with title '{custom_title}'.", parse_mode='HTML')
         
@@ -155,7 +155,16 @@ async def kick_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if entity.type == "text_mention":
                     target_user = entity.user
                     break
-                # Handling @username is tricky without cache, skipping for simplicity unless entity exists
+            
+            # Try username lookup if no entity found
+            if not target_user and args[0].startswith("@"):
+                try:
+                    user_id = await Database.get_user_id_by_username(args[0])
+                    if user_id:
+                        member = await context.bot.get_chat_member(chat_id, int(user_id))
+                        target_user = member.user
+                except:
+                    pass
     
     if not target_user:
         await message.reply_text("❌ Please reply to a user or mention them to kick.")
@@ -174,7 +183,7 @@ async def kick_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # If promoted by bot, we can try to kick.
         # We should also remove them from DB
-        Database.remove_bot_promoted_admin(chat_id, str(target_user.id))
+        await Database.remove_bot_promoted_admin(chat_id, str(target_user.id))
 
     try:
         # Ban (Kick)

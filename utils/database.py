@@ -103,6 +103,10 @@ class Database:
                 custom_title TEXT,
                 promoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (chat_id, user_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS user_usernames (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL
             )"""
         ]
         
@@ -325,18 +329,18 @@ class Database:
 
     # --- Bot Promoted Admins ---
     @staticmethod
-    def add_bot_promoted_admin(chat_id: str, user_id: str, custom_title: str) -> bool:
+    async def add_bot_promoted_admin(chat_id: str, user_id: str, custom_title: str) -> bool:
         """Record that a user was promoted by the bot."""
-        result = execute_query(
+        result = await execute_query(
             "INSERT OR REPLACE INTO bot_promoted_admins (chat_id, user_id, custom_title) VALUES (?, ?, ?)",
             (chat_id, user_id, custom_title)
         )
         return result is not None
 
     @staticmethod
-    def remove_bot_promoted_admin(chat_id: str, user_id: str) -> bool:
+    async def remove_bot_promoted_admin(chat_id: str, user_id: str) -> bool:
         """Remove a user from bot promoted admins records."""
-        result = execute_query(
+        result = await execute_query(
             "DELETE FROM bot_promoted_admins WHERE chat_id = ? AND user_id = ?",
             (chat_id, user_id)
         )
@@ -351,3 +355,23 @@ class Database:
             fetch_one=True
         )
         return result is not None
+
+    # --- Usernames ---
+    @staticmethod
+    def update_username(user_id: str, username: str) -> bool:
+        """Update username mapping."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO user_usernames (user_id, username) VALUES (?, ?)",
+            (user_id, username.lower().replace('@', ''))
+        )
+        return result is not None
+
+    @staticmethod
+    async def get_user_id_by_username(username: str) -> Optional[str]:
+        """Get user ID from username."""
+        result = await execute_query(
+            "SELECT user_id FROM user_usernames WHERE username = ?",
+            (username.lower().replace('@', ''),),
+            fetch_one=True
+        )
+        return result[0] if result else None

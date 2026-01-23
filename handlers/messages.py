@@ -332,7 +332,7 @@ async def handle_custom_responses(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def track_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Track messages for clear commands."""
+    """Track messages for clear commands and update username mapping."""
     from handlers.moderation import track_message
     
     msg = update.message or update.edited_message
@@ -342,6 +342,10 @@ async def track_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = msg.from_user
     if not user:
         return
+    
+    # Update username mapping in database
+    if user.username:
+        Database.update_username(str(user.id), user.username)
     
     username = user.username.lower() if user.username else "unknown"
     track_message(msg.chat_id, msg.message_id, user.id, username)
