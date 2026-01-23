@@ -96,6 +96,13 @@ class Database:
                 antispam_enabled INTEGER DEFAULT 0,
                 spam_limit INTEGER DEFAULT 6,
                 mute_penalty INTEGER DEFAULT 15
+            )""",
+            """CREATE TABLE IF NOT EXISTS bot_promoted_admins (
+                chat_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                custom_title TEXT,
+                promoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (chat_id, user_id)
             )"""
         ]
         
@@ -313,5 +320,34 @@ class Database:
         result = execute_query(
             "INSERT OR REPLACE INTO chat_settings (chat_id, ai_threshold) VALUES (?, ?)",
             (chat_id, threshold)
+        )
+        return result is not None
+
+    # --- Bot Promoted Admins ---
+    @staticmethod
+    def add_bot_promoted_admin(chat_id: str, user_id: str, custom_title: str) -> bool:
+        """Record that a user was promoted by the bot."""
+        result = execute_query(
+            "INSERT OR REPLACE INTO bot_promoted_admins (chat_id, user_id, custom_title) VALUES (?, ?, ?)",
+            (chat_id, user_id, custom_title)
+        )
+        return result is not None
+
+    @staticmethod
+    def remove_bot_promoted_admin(chat_id: str, user_id: str) -> bool:
+        """Remove a user from bot promoted admins records."""
+        result = execute_query(
+            "DELETE FROM bot_promoted_admins WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user_id)
+        )
+        return result is not None and result > 0
+
+    @staticmethod
+    async def is_bot_promoted_admin(chat_id: str, user_id: str) -> bool:
+        """Check if a user was promoted by the bot."""
+        result = await execute_query(
+            "SELECT 1 FROM bot_promoted_admins WHERE chat_id = ? AND user_id = ? LIMIT 1",
+            (chat_id, user_id),
+            fetch_one=True
         )
         return result is not None

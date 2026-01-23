@@ -28,7 +28,7 @@ from handlers.moderation import (
     label_bad, label_normal, list_collected,
     ai_moderation_on, ai_moderation_off, debug_badness, packids, get_sticker_id
 )
-from handlers.admin import admins_enable, admins_disable
+from handlers.admin import admins_enable, admins_disable, promote_user, kick_user
 from handlers.messages import handle_messages, track_messages
 
 # Setup logging
@@ -76,6 +76,8 @@ def register_handlers(app: Application) -> None:
     # Admin commands
     app.add_handler(CommandHandler("admins_enable", admins_enable))
     app.add_handler(CommandHandler("admins_disable", admins_disable))
+    app.add_handler(CommandHandler("promote", promote_user))
+    app.add_handler(CommandHandler("kick", kick_user))
     
     # Message handlers
     app.add_handler(MessageHandler(filters.ALL, handle_messages))
